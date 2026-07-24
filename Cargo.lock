@@ -5,10 +5,18 @@ version = 4
 [[package]]
 name = "app"
 version = "0.1.0"
+dependencies = [
+ "audio-engine",
+ "common",
+]
 
 [[package]]
 name = "audio-engine"
 version = "0.1.0"
+dependencies = [
+ "common",
+ "dsp",
+]
 
 [[package]]
 name = "common"
@@ -17,3 +25,6 @@ version = "0.1.0"
 [[package]]
 name = "dsp"
 version = "0.1.0"
+dependencies = [
+ "common",
+]
