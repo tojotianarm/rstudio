@@ -7,7 +7,7 @@ use cpal::{
 use crossbeam_queue::ArrayQueue;
 use thiserror::Error;
 
-use crate::{AudioCommand, AudioEngine, AudioEvent};
+use crate::{AudioCommand, AudioEngine, AudioEvent, AudioFormat};
 
 const COMMAND_QUEUE_CAPACITY: usize = 256;
 const EVENT_QUEUE_CAPACITY: usize = 256;
@@ -52,6 +52,8 @@ pub enum AudioStreamError {
     PlayStream(#[source] cpal::PlayStreamError),
     #[error("the real-time command queue is full")]
     CommandQueueFull,
+    #[error("could not configure the engine for the negotiated output format: {0}")]
+    EngineConfiguration(#[source] common::error::RStudioError),
 }
 
 #[derive(Clone)]
@@ -81,7 +83,7 @@ pub struct CpalOutputStream {
 }
 
 impl CpalOutputStream {
-    pub fn open_default(engine: AudioEngine) -> Result<Self, AudioStreamError> {
+    pub fn open_default(mut engine: AudioEngine) -> Result<Self, AudioStreamError> {
         let device = cpal::default_host()
             .default_output_device()
             .ok_or(AudioStreamError::NoDefaultOutputDevice)?;
@@ -93,6 +95,13 @@ impl CpalOutputStream {
             buffer_size: device_buffer_size(supported_config.buffer_size()),
         };
         let config = supported_config.config();
+        let format = AudioFormat::new(config.sample_rate.0, usize::from(config.channels))
+            .map_err(AudioStreamError::EngineConfiguration)?;
+        let maximum_callback_frames =
+            maximum_callback_frames(supported_config.buffer_size(), engine.config().buffer_size);
+        engine
+            .configure_output(format, maximum_callback_frames)
+            .map_err(AudioStreamError::EngineConfiguration)?;
         let commands = Arc::new(ArrayQueue::new(COMMAND_QUEUE_CAPACITY));
         let events = Arc::new(ArrayQueue::new(EVENT_QUEUE_CAPACITY));
         let stream = build_stream(
@@ -138,6 +147,13 @@ fn device_buffer_size(size: &SupportedBufferSize) -> DeviceBufferSize {
     }
 }
 
+fn maximum_callback_frames(size: &SupportedBufferSize, fallback: usize) -> usize {
+    match size {
+        SupportedBufferSize::Unknown => fallback,
+        SupportedBufferSize::Range { max, .. } => usize::try_from(*max).unwrap_or(fallback),
+    }
+}
+
 fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -146,17 +162,10 @@ fn build_stream(
     commands: Arc<ArrayQueue<AudioCommand>>,
     events: Arc<ArrayQueue<AudioEvent>>,
 ) -> Result<Stream, AudioStreamError> {
-    let channels = usize::from(config.channels);
     match sample_format {
-        SampleFormat::F32 => {
-            build_typed_stream::<f32>(device, config, engine, commands, events, channels)
-        }
-        SampleFormat::I16 => {
-            build_typed_stream::<i16>(device, config, engine, commands, events, channels)
-        }
-        SampleFormat::U16 => {
-            build_typed_stream::<u16>(device, config, engine, commands, events, channels)
-        }
+        SampleFormat::F32 => build_typed_stream::<f32>(device, config, engine, commands, events),
+        SampleFormat::I16 => build_typed_stream::<i16>(device, config, engine, commands, events),
+        SampleFormat::U16 => build_typed_stream::<u16>(device, config, engine, commands, events),
         unsupported => Err(AudioStreamError::UnsupportedSampleFormat(unsupported)),
     }
 }
@@ -167,10 +176,9 @@ fn build_typed_stream<T>(
     mut engine: AudioEngine,
     commands: Arc<ArrayQueue<AudioCommand>>,
     events: Arc<ArrayQueue<AudioEvent>>,
-    channels: usize,
 ) -> Result<Stream, AudioStreamError>
 where
-    T: cpal::SizedSample + cpal::FromSample<f32>,
+    T: cpal::SizedSample + cpal::FromSample<f32> + cpal::Sample,
 {
     let callback_events = Arc::clone(&events);
     device
@@ -183,18 +191,8 @@ where
                         None => break,
                     }
                 }
-                for frame in output.chunks_exact_mut(channels) {
-                    let sample = engine.next_output_sample();
-                    for output_sample in frame {
-                        *output_sample = T::from_sample(sample);
-                    }
-                }
-                let remainder = output.len() % channels;
-                if remainder != 0 {
-                    let output_len = output.len();
-                    for output_sample in &mut output[output_len - remainder..] {
-                        *output_sample = T::from_sample(0.0);
-                    }
+                if !engine.render_device_buffer(output) {
+                    let _ = callback_events.push(AudioEvent::OutputBufferCapacityExceeded);
                 }
                 let _ = callback_events.push(AudioEvent::ProcessedBlock);
             },

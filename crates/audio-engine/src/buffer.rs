@@ -66,6 +66,31 @@ impl AudioBuffer {
     pub fn block_mut(&mut self) -> AudioBlockMut<'_> {
         AudioBlockMut { samples: &mut self.samples, format: self.format }
     }
+
+    pub fn block_mut_for_frames(&mut self, frames: usize) -> Option<AudioBlockMut<'_>> {
+        let sample_count = frames.checked_mul(self.format.channels())?;
+        let samples = self.samples.get_mut(..sample_count)?;
+        Some(AudioBlockMut { samples, format: self.format })
+    }
+}
+
+pub struct AudioBlock<'a> {
+    samples: &'a [f32],
+    format: AudioFormat,
+}
+
+impl<'a> AudioBlock<'a> {
+    pub fn as_slice(&self) -> &[f32] {
+        self.samples
+    }
+
+    pub fn frames(&self) -> usize {
+        self.samples.len() / self.format.channels()
+    }
+
+    pub fn format(&self) -> AudioFormat {
+        self.format
+    }
 }
 
 pub struct AudioBlockMut<'a> {
@@ -80,6 +105,12 @@ impl<'a> AudioBlockMut<'a> {
 
     pub fn clear(&mut self) {
         self.samples.fill(0.0);
+    }
+    pub fn as_slice(&self) -> &[f32] {
+        self.samples
+    }
+    pub fn as_block(&self) -> AudioBlock<'_> {
+        AudioBlock { samples: self.samples, format: self.format }
     }
     pub fn frames(&self) -> usize {
         self.samples.len() / self.format.channels()

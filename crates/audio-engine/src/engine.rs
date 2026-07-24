@@ -1,18 +1,21 @@
-use crate::{AudioBlockMut, AudioCommand};
+use crate::{AudioBlockMut, AudioBuffer, AudioCommand, AudioFormat, AudioGraph, AudioGraphCommand};
 use common::{config::AppConfig, error::Result};
-use dsp::oscillator::Oscillator;
 
 pub struct AudioEngine {
     config: AppConfig,
     running: bool,
-    oscillator: Oscillator,
+    graph: AudioGraph,
+    render_buffer: AudioBuffer,
 }
 
 impl AudioEngine {
     pub fn new(config: AppConfig) -> Result<Self> {
         config.validate()?;
+        let format = AudioFormat::new(config.sample_rate, 1)?;
+        let render_buffer = AudioBuffer::new(config.buffer_size, format)?;
         Ok(Self {
-            oscillator: Oscillator::new(440.0, config.sample_rate as f32),
+            graph: AudioGraph::with_oscillator(format, 440.0),
+            render_buffer,
             config,
             running: false,
         })
@@ -34,9 +37,29 @@ impl AudioEngine {
         &self.config
     }
 
+    pub fn output_format(&self) -> AudioFormat {
+        self.graph.format()
+    }
+
+    /// Configures the graph from the format negotiated with the output device.
+    ///
+    /// This method may allocate its fixed render buffer and must only run before the stream starts.
+    pub fn configure_output(
+        &mut self,
+        format: AudioFormat,
+        maximum_callback_frames: usize,
+    ) -> Result<()> {
+        let render_buffer = AudioBuffer::new(maximum_callback_frames, format)?;
+        self.graph.prepare(format);
+        self.render_buffer = render_buffer;
+        Ok(())
+    }
+
     pub fn process(&mut self, block: &mut AudioBlockMut<'_>) {
-        for frame in block.frames_mut() {
-            frame.fill(self.next_output_sample());
+        if self.running {
+            self.graph.process(block);
+        } else {
+            block.clear();
         }
     }
 
@@ -44,16 +67,40 @@ impl AudioEngine {
         match command {
             AudioCommand::Start => self.start(),
             AudioCommand::Stop => self.stop(),
-            AudioCommand::SetOscillatorFrequency(frequency)
-                if frequency.is_finite() && frequency >= 0.0 =>
-            {
-                self.oscillator.set_frequency(frequency)
+            AudioCommand::SetOscillatorFrequency(frequency) => {
+                self.graph.apply_command(AudioGraphCommand::SetOscillatorFrequency(frequency));
             }
-            AudioCommand::SetOscillatorFrequency(_) => {}
         }
     }
 
-    pub(crate) fn next_output_sample(&mut self) -> f32 {
-        if self.running { self.oscillator.next_sample() } else { 0.0 }
+    pub(crate) fn render_device_buffer<T>(&mut self, output: &mut [T]) -> bool
+    where
+        T: cpal::FromSample<f32> + cpal::Sample,
+    {
+        let channels = self.output_format().channels();
+        if !output.len().is_multiple_of(channels) {
+            for sample in output {
+                *sample = T::from_sample(0.0);
+            }
+            return false;
+        }
+
+        let frames = output.len() / channels;
+        let Some(mut render_block) = self.render_buffer.block_mut_for_frames(frames) else {
+            for sample in output {
+                *sample = T::from_sample(0.0);
+            }
+            return false;
+        };
+        if self.running {
+            self.graph.process(&mut render_block);
+        } else {
+            render_block.clear();
+        }
+
+        for (device_sample, rendered_sample) in output.iter_mut().zip(render_block.as_slice()) {
+            *device_sample = T::from_sample(*rendered_sample);
+        }
+        true
     }
 }

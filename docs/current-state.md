@@ -21,6 +21,11 @@ audio callback -> DSP oscillator -> output device
 
 `AudioEngine` owns processing state and is moved into the CPAL callback. CPAL-specific device and stream management stays in `audio-engine::stream`; `dsp` has no CPAL dependency.
 
+Audio rendering now passes through a minimal `AudioGraph` with one `OscillatorNode`. CPAL's
+negotiated sample rate and channel count configure the graph before stream creation. The callback
+uses only preallocated graph buffers; an oversized callback is silenced and reported as an event
+rather than resizing memory.
+
 ## Implemented Features
 
 - Validated application audio configuration.
@@ -28,6 +33,7 @@ audio callback -> DSP oscillator -> output device
 - Minimal real-time audio callback for `f32`, `i16`, and `u16` output devices.
 - Bounded lock-free command and event queues between the application and audio callback.
 - Typed stream creation and start errors.
+- Linear audio graph and extensible multi-input/multi-output `AudioNode` contract.
 
 ## Not Implemented Yet
 
