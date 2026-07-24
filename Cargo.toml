@@ -7,3 +7,14 @@ members = [
     "crates/audio-engine",
     "crates/dsp"
 ]
+
+[workspace.package]
+edition = "2026"
+version = "0.1.0"
+authors = ["tojo"]
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
