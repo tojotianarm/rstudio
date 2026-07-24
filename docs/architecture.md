@@ -72,11 +72,24 @@ The crate separates the hardware-independent `AudioEngine` from its CPAL stream 
 
 Application-to-audio commands and audio-to-application events use bounded lock-free queues. The callback only drains a bounded number of commands, renders samples, converts them to the device format, and attempts non-blocking event publication.
 
+`AudioEngine` also owns a hardware-independent `Transport`. It tracks the sample position,
+play/pause state, BPM, and the negotiated sample rate. The transport advances by the rendered
+frame count only while playing. Audio time is expressed as absolute sample position; musical time
+is derived from BPM through explicit beat-to-sample helpers. `Play`, `Pause`, `Seek`, and `SetBpm`
+are consumed from the existing command queue, and `TransportUpdate` is published best-effort from
+the callback. The transport does not yet alter graph processing or schedule clips.
+
 `AudioEngine` delegates rendering to an `AudioGraph`. The initial graph is a fixed linear chain:
-`OscillatorNode -> GainNode -> MixerNode -> output`. The graph owns preallocated intermediate
-buffers for every link before the final output, so execution in the callback neither allocates nor
-resizes memory. `GainNode` receives parameter updates through the existing bounded command queue;
-`MixerNode` accepts a fixed number of input buses and saturates its output.
+`OscillatorNode -> GainNode -> MixerNode -> MasterBus -> output`. The graph owns preallocated
+intermediate buffers for every link before the final output, so execution in the callback neither
+allocates nor resizes memory. `MasterBus` applies the final gain and is the future insertion point
+for master effects such as a limiter, EQ, or compressor. `SetMasterGain` travels through the
+existing bounded command queue and is consumed only by `MasterBus`.
+
+The graph measures the signal after `MasterBus` on every rendered block. `AudioMeter` computes
+peak and RMS without temporary buffers, then the CPAL adapter publishes a best-effort
+`AudioEvent::MeterUpdate` through the existing bounded lock-free event queue. Events may be
+dropped when that queue is full; the callback never blocks to publish metering data.
 
 Its `Vec<Box<dyn AudioNode>>` is a deliberately limited, pre-stream abstraction: topology never
 changes in the callback and it is not the final DAW graph model. The node contract receives input
@@ -104,10 +117,13 @@ Application Commands
 Audio Engine API
      |
      v
+Transport
+     |
+     v
 CPAL output callback
      |
      v
-AudioGraph: oscillator -> gain -> mixer
+AudioGraph: oscillator -> gain -> mixer -> master bus -> meter
      |
      v
 Audio Output

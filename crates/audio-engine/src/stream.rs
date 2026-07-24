@@ -191,8 +191,20 @@ where
                         None => break,
                     }
                 }
-                if !engine.render_device_buffer(output) {
-                    let _ = callback_events.push(AudioEvent::OutputBufferCapacityExceeded);
+                match engine.render_device_buffer(output) {
+                    Some(render_result) => {
+                        let _ = callback_events.push(AudioEvent::MeterUpdate {
+                            peak: render_result.meter.peak(),
+                            rms: render_result.meter.rms(),
+                        });
+                        let _ = callback_events.push(AudioEvent::TransportUpdate {
+                            position_samples: render_result.transport.position_samples(),
+                            playing: render_result.transport.is_playing(),
+                        });
+                    }
+                    None => {
+                        let _ = callback_events.push(AudioEvent::OutputBufferCapacityExceeded);
+                    }
                 }
                 let _ = callback_events.push(AudioEvent::ProcessedBlock);
             },

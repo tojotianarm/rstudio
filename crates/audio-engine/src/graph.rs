@@ -1,8 +1,8 @@
 use common::error::Result;
 
 use crate::{
-    AudioBlockMut, AudioBuffer, AudioFormat, AudioGraphCommand, AudioNode, GainNode, MixerNode,
-    OscillatorNode,
+    AudioBlockMut, AudioBuffer, AudioFormat, AudioGraphCommand, AudioMeter, AudioNode, GainNode,
+    MasterBus, MixerNode, OscillatorNode,
 };
 
 /// Minimal linear audio graph.
@@ -16,11 +16,12 @@ pub struct AudioGraph {
     nodes: Vec<Box<dyn AudioNode>>,
     intermediate_buffers: Vec<AudioBuffer>,
     maximum_block_frames: usize,
+    meter: AudioMeter,
 }
 
 impl AudioGraph {
     /// Creates the initial linear processing chain:
-    /// `OscillatorNode -> GainNode -> MixerNode -> output`.
+    /// `OscillatorNode -> GainNode -> MixerNode -> MasterBus -> output`.
     ///
     /// Intermediate buffers are allocated here, outside the audio callback.
     pub fn with_oscillator(
@@ -32,15 +33,25 @@ impl AudioGraph {
             Box::new(OscillatorNode::new(frequency, format)),
             Box::new(GainNode::new(1.0)),
             Box::new(MixerNode::new(1)),
+            Box::new(MasterBus::new(1.0)),
         ];
-        let mut graph =
-            Self { format, nodes, intermediate_buffers: Vec::new(), maximum_block_frames: 0 };
+        let mut graph = Self {
+            format,
+            nodes,
+            intermediate_buffers: Vec::new(),
+            maximum_block_frames: 0,
+            meter: AudioMeter::default(),
+        };
         graph.prepare(format, maximum_block_frames)?;
         Ok(graph)
     }
 
     pub fn format(&self) -> AudioFormat {
         self.format
+    }
+
+    pub fn meter(&self) -> AudioMeter {
+        self.meter
     }
 
     /// Allocates fixed intermediate buffers before the audio stream begins.
@@ -55,22 +66,26 @@ impl AudioGraph {
         }
         self.intermediate_buffers = intermediate_buffers;
         self.maximum_block_frames = maximum_block_frames;
+        self.meter = AudioMeter::default();
         Ok(())
     }
 
     pub fn process(&mut self, output: &mut AudioBlockMut<'_>) {
         if output.format() != self.format || output.frames() > self.maximum_block_frames {
             output.clear();
+            self.meter.measure(output.as_block());
             return;
         }
 
         output.clear();
         let last_node_index = self.nodes.len().saturating_sub(1);
         if self.nodes.is_empty() || self.intermediate_buffers.len() != last_node_index {
+            self.meter.measure(output.as_block());
             return;
         }
 
         let frames = output.frames();
+        let mut render_failed = false;
         for node_index in 0..self.nodes.len() {
             let node = &mut self.nodes[node_index];
             if node_index == 0 && node_index == last_node_index {
@@ -79,27 +94,27 @@ impl AudioGraph {
                 let Some(mut node_output) =
                     self.intermediate_buffers[0].block_mut_for_frames(frames)
                 else {
-                    output.clear();
-                    return;
+                    render_failed = true;
+                    break;
                 };
                 node.process(&[], std::slice::from_mut(&mut node_output));
             } else if node_index == last_node_index {
                 let Some(node_input) =
                     self.intermediate_buffers[node_index - 1].block_for_frames(frames)
                 else {
-                    output.clear();
-                    return;
+                    render_failed = true;
+                    break;
                 };
                 node.process(std::slice::from_ref(&node_input), std::slice::from_mut(&mut *output));
             } else {
                 let (completed, remaining) = self.intermediate_buffers.split_at_mut(node_index);
                 let Some(node_input) = completed[node_index - 1].block_for_frames(frames) else {
-                    output.clear();
-                    return;
+                    render_failed = true;
+                    break;
                 };
                 let Some(mut node_output) = remaining[0].block_mut_for_frames(frames) else {
-                    output.clear();
-                    return;
+                    render_failed = true;
+                    break;
                 };
                 node.process(
                     std::slice::from_ref(&node_input),
@@ -107,6 +122,10 @@ impl AudioGraph {
                 );
             }
         }
+        if render_failed {
+            output.clear();
+        }
+        self.meter.measure(output.as_block());
     }
 
     pub fn reset(&mut self) {

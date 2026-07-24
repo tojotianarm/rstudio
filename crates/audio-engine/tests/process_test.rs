@@ -1,6 +1,6 @@
 use audio_engine::{
-    AudioBuffer, AudioEngine, AudioFormat, AudioGraph, AudioGraphCommand, AudioNode, GainNode,
-    MixerNode,
+    AudioBuffer, AudioEngine, AudioFormat, AudioGraph, AudioGraphCommand, AudioMeter, AudioNode,
+    GainNode, MasterBus, MixerNode,
 };
 use common::config::AppConfig;
 
@@ -105,7 +105,7 @@ fn mixer_node_sums_two_input_buses() {
 }
 
 #[test]
-fn graph_routes_oscillator_through_gain_and_mixer() {
+fn graph_routes_oscillator_through_master_bus() {
     let format = AudioFormat::new(48_000, 1).expect("valid mono format");
     let mut graph =
         AudioGraph::with_oscillator(format, 64, 440.0).expect("graph buffers are valid");
@@ -117,6 +117,53 @@ fn graph_routes_oscillator_through_gain_and_mixer() {
     assert!(output.as_slice().iter().all(|sample| *sample == 0.0));
 }
 
+#[test]
+fn master_bus_preserves_unity_gain() {
+    assert_eq!(process_master_bus(1.0, [0.5, -0.5]), [0.5, -0.5]);
+}
+
+#[test]
+fn master_bus_scales_signal() {
+    assert_eq!(process_master_bus(0.5, [0.5, -0.5]), [0.25, -0.25]);
+}
+
+#[test]
+fn master_bus_saturates_output() {
+    assert_eq!(process_master_bus(1.0, [2.0, -2.0]), [1.0, -1.0]);
+}
+
+#[test]
+fn audio_meter_measures_peak_and_rms_for_a_block() {
+    let format = AudioFormat::new(48_000, 1).expect("valid mono format");
+    let mut input = AudioBuffer::new(2, format).expect("buffer dimensions are valid");
+    input.as_mut_slice().copy_from_slice(&[0.5, -0.5]);
+    let mut meter = AudioMeter::default();
+
+    meter.measure(input.block());
+
+    assert_eq!(meter.peak(), 0.5);
+    assert!((meter.rms() - 0.5).abs() < 1.0e-6);
+    assert!(meter.peak().is_finite());
+    assert!(meter.rms().is_finite());
+}
+
+#[test]
+fn complete_graph_pipeline_outputs_valid_samples_within_preallocated_capacity() {
+    let format = AudioFormat::new(48_000, 2).expect("valid stereo format");
+    let mut graph =
+        AudioGraph::with_oscillator(format, 64, 440.0).expect("graph buffers are valid");
+    let mut output = AudioBuffer::new(64, format).expect("buffer dimensions are valid");
+
+    graph.process(&mut output.block_mut());
+
+    assert_eq!(output.frames(), 64);
+    assert_eq!(output.format(), format);
+    assert!(output.as_slice().iter().all(|sample| sample.is_finite()));
+    assert!(output.as_slice().iter().all(|sample| (-1.0..=1.0).contains(sample)));
+    assert!(graph.meter().peak().is_finite());
+    assert!(graph.meter().rms().is_finite());
+}
+
 fn process_gain(gain_value: f32) -> [f32; 2] {
     let format = AudioFormat::new(48_000, 1).expect("valid mono format");
     let mut input = AudioBuffer::new(2, format).expect("buffer dimensions are valid");
@@ -126,6 +173,19 @@ fn process_gain(gain_value: f32) -> [f32; 2] {
 
     let mut output_block = output.block_mut();
     gain.process(&[input.block()], std::slice::from_mut(&mut output_block));
+
+    [output.as_slice()[0], output.as_slice()[1]]
+}
+
+fn process_master_bus(gain_value: f32, input_samples: [f32; 2]) -> [f32; 2] {
+    let format = AudioFormat::new(48_000, 1).expect("valid mono format");
+    let mut input = AudioBuffer::new(2, format).expect("buffer dimensions are valid");
+    input.as_mut_slice().copy_from_slice(&input_samples);
+    let mut output = AudioBuffer::new(2, format).expect("buffer dimensions are valid");
+    let mut master_bus = MasterBus::new(gain_value);
+
+    let mut output_block = output.block_mut();
+    master_bus.process(&[input.block()], std::slice::from_mut(&mut output_block));
 
     [output.as_slice()[0], output.as_slice()[1]]
 }

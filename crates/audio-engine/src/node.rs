@@ -137,12 +137,6 @@ impl AudioNode for GainNode {
     }
 
     fn reset(&mut self) {}
-
-    fn apply_command(&mut self, command: AudioGraphCommand) {
-        if let AudioGraphCommand::SetMasterGain(gain) = command {
-            self.set_gain(gain);
-        }
-    }
 }
 
 /// Mixes a fixed number of input buses into one saturated output bus.
@@ -196,6 +190,73 @@ impl AudioNode for MixerNode {
     }
 
     fn reset(&mut self) {}
+}
+
+/// Final output bus of the graph.
+///
+/// Effects such as a limiter or master EQ will be inserted here in a future graph revision.
+pub struct MasterBus {
+    gain: f32,
+}
+
+impl MasterBus {
+    pub fn new(gain: f32) -> Self {
+        let mut bus = Self { gain: 1.0 };
+        bus.set_gain(gain);
+        bus
+    }
+
+    pub fn set_gain(&mut self, gain: f32) {
+        self.gain = if gain.is_finite() { gain.max(0.0) } else { 0.0 };
+    }
+
+    pub fn gain(&self) -> f32 {
+        self.gain
+    }
+}
+
+impl AudioNode for MasterBus {
+    fn input_count(&self) -> usize {
+        1
+    }
+
+    fn output_count(&self) -> usize {
+        1
+    }
+
+    fn prepare(&mut self, _format: AudioFormat) {}
+
+    fn process(&mut self, inputs: &[AudioBlock<'_>], outputs: &mut [AudioBlockMut<'_>]) {
+        let output_count = outputs.len();
+        let Some(input) = inputs.first() else {
+            clear_first_output(outputs);
+            return;
+        };
+        let Some(output) = outputs.first_mut() else {
+            return;
+        };
+        if inputs.len() != self.input_count()
+            || output_count != self.output_count()
+            || input.format() != output.format()
+            || input.as_slice().len() != output.as_slice().len()
+        {
+            output.clear();
+            return;
+        }
+
+        for (destination, source) in output.as_mut_slice().iter_mut().zip(input.as_slice()) {
+            *destination =
+                if source.is_finite() { (*source * self.gain).clamp(-1.0, 1.0) } else { 0.0 };
+        }
+    }
+
+    fn reset(&mut self) {}
+
+    fn apply_command(&mut self, command: AudioGraphCommand) {
+        if let AudioGraphCommand::SetMasterGain(gain) = command {
+            self.set_gain(gain);
+        }
+    }
 }
 
 fn clear_first_output(outputs: &mut [AudioBlockMut<'_>]) {

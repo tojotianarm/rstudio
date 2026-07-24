@@ -16,15 +16,23 @@ AudioEngine API (hardware-independent)
 CPAL output stream adapter
  |
  v
-audio callback -> AudioGraph (oscillator -> gain -> mixer) -> output device
+audio callback -> Transport -> AudioGraph (oscillator -> gain -> mixer -> master bus -> meter) -> output device
 ```
 
 `AudioEngine` owns processing state and is moved into the CPAL callback. CPAL-specific device and stream management stays in `audio-engine::stream`; `dsp` has no CPAL dependency.
 
-Audio rendering now passes through a minimal `AudioGraph` with `OscillatorNode`, `GainNode`, and
-`MixerNode`. CPAL's negotiated sample rate and channel count configure the graph and preallocate
-its intermediate buffers before stream creation. The callback uses no allocations, locks, or system
-access; an oversized callback is silenced and reported as an event rather than resizing memory.
+Audio rendering now passes through a minimal `AudioGraph` with `OscillatorNode`, `GainNode`,
+`MixerNode`, and `MasterBus`. CPAL's negotiated sample rate and channel count configure the graph
+and preallocate its intermediate buffers before stream creation. `AudioMeter` measures peak and
+RMS after the master bus; CPAL publishes the values as non-blocking, best-effort events. The
+callback uses no allocations, locks, or system access; an oversized callback is silenced and
+reported as an event rather than resizing memory.
+
+`Transport` is owned by `AudioEngine`, not by the application or CPAL. It advances its sample
+position only for rendered blocks while playing, and provides sample/second and beat/sample
+conversion using the negotiated sample rate and BPM. Transport commands and best-effort state
+updates use the existing bounded lock-free queues. It does not yet drive clips, automation, MIDI,
+or graph scheduling.
 
 ## Implemented Features
 
@@ -33,8 +41,10 @@ access; an oversized callback is silenced and reported as an event rather than r
 - Minimal real-time audio callback for `f32`, `i16`, and `u16` output devices.
 - Bounded lock-free command and event queues between the application and audio callback.
 - Typed stream creation and start errors.
-- Linear `oscillator -> gain -> mixer -> output` graph with preallocated intermediate buffers.
-- Gain control through the bounded real-time command queue, plus saturated gain and mix output.
+- Linear `oscillator -> gain -> mixer -> master bus -> output` graph with preallocated buffers.
+- Master gain control through the bounded real-time command queue, plus saturated node output.
+- Per-block peak/RMS metering emitted through the bounded event queue.
+- Sample-accurate transport state with play, pause, stop, seek, BPM, and time conversions.
 - Extensible multi-input/multi-output `AudioNode` contract; `MixerNode` supports a fixed number
   of input buses.
 

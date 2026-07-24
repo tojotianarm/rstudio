@@ -126,3 +126,37 @@ starts.
 This provides real node-to-node routing without allocations, locks, or topology changes in the
 audio callback. `AudioNode` already accepts input and output bus slices, preserving a migration
 path to a future routed multi-bus graph without adding a graph planner prematurely.
+
+---
+
+# ADR-006: Master Bus and Best-Effort Metering
+
+Date: 2026-07-24
+
+## Decision
+
+Terminate the initial graph with a `MasterBus`, and measure peak/RMS after that bus for each
+rendered block. Publish the measurements through the existing bounded lock-free event queue.
+
+## Reason
+
+The master bus creates a dedicated location for final gain and future master effects. Measuring
+after it reports the signal actually sent to the output. Meter events are intentionally best-effort:
+the callback drops an event when the queue is full rather than allocating or blocking.
+
+---
+
+# ADR-007: Audio-Thread-Owned Transport
+
+Date: 2026-07-24
+
+## Decision
+
+Keep transport state inside `AudioEngine` and advance it from completed render blocks only while
+playing. Exchange transport commands and snapshots through the existing bounded lock-free queues.
+
+## Reason
+
+The audio thread is the authoritative source for sample position. Keeping the state there avoids
+locks and clock drift between the application and hardware callback while preserving a future path
+to timeline, MIDI, clip, and automation scheduling.
