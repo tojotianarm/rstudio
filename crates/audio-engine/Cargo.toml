@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 common = { path = "../common" }
 dsp = { path = "../dsp" }
+cpal = "0.16"

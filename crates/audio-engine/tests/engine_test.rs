@@ -1,12 +1,19 @@
 use audio_engine::AudioEngine;
 use common::config::AppConfig;
 
-fn main() {
+#[test]
+fn engine_can_start_and_stop() {
     let config = AppConfig::default();
 
     let mut engine = AudioEngine::new(config);
 
+    assert!(!engine.is_running());
+
     engine.start();
 
-    println!("Audio engine running: {}", engine.is_running());
+    assert!(engine.is_running());
+
+    engine.stop();
+
+    assert!(!engine.is_running());
 }
