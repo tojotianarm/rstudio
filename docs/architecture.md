@@ -72,11 +72,16 @@ The crate separates the hardware-independent `AudioEngine` from its CPAL stream 
 
 Application-to-audio commands and audio-to-application events use bounded lock-free queues. The callback only drains a bounded number of commands, renders samples, converts them to the device format, and attempts non-blocking event publication.
 
-`AudioEngine` now delegates rendering to an `AudioGraph`. The first graph is linear and owns a
-single oscillator node. Its `Vec<Box<dyn AudioNode>>` is a deliberately limited, pre-stream
-abstraction: it never changes in the callback and is not the final topology model. The node
-contract receives input and output bus slices (and declares their counts), so a future graph
-planner can introduce multiple buses without changing the processing interface.
+`AudioEngine` delegates rendering to an `AudioGraph`. The initial graph is a fixed linear chain:
+`OscillatorNode -> GainNode -> MixerNode -> output`. The graph owns preallocated intermediate
+buffers for every link before the final output, so execution in the callback neither allocates nor
+resizes memory. `GainNode` receives parameter updates through the existing bounded command queue;
+`MixerNode` accepts a fixed number of input buses and saturates its output.
+
+Its `Vec<Box<dyn AudioNode>>` is a deliberately limited, pre-stream abstraction: topology never
+changes in the callback and it is not the final DAW graph model. The node contract receives input
+and output bus slices (and declares their counts), so a future planner can introduce routing and
+multiple buses without changing the processing interface.
 
 ### dsp
 
@@ -99,13 +104,10 @@ Application Commands
 Audio Engine API
      |
      v
-CPAL Output Callback
+CPAL output callback
      |
      v
-DSP Processing
-     |
-     v
-Mixer
+AudioGraph: oscillator -> gain -> mixer
      |
      v
 Audio Output

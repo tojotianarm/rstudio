@@ -108,3 +108,21 @@ Documentation provides:
 - Project memory
 - Consistent decisions
 - Faster development
+
+---
+
+# ADR-005: Preallocated Linear Audio Graph
+
+Date: 2026-07-24
+
+## Decision
+
+Use a fixed `OscillatorNode -> GainNode -> MixerNode -> output` chain for the first composable
+audio graph. Allocate its intermediate buffers during graph preparation, before the CPAL stream
+starts.
+
+## Reason
+
+This provides real node-to-node routing without allocations, locks, or topology changes in the
+audio callback. `AudioNode` already accepts input and output bus slices, preserving a migration
+path to a future routed multi-bus graph without adding a graph planner prematurely.

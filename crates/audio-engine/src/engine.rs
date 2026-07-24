@@ -14,7 +14,7 @@ impl AudioEngine {
         let format = AudioFormat::new(config.sample_rate, 1)?;
         let render_buffer = AudioBuffer::new(config.buffer_size, format)?;
         Ok(Self {
-            graph: AudioGraph::with_oscillator(format, 440.0),
+            graph: AudioGraph::with_oscillator(format, config.buffer_size, 440.0)?,
             render_buffer,
             config,
             running: false,
@@ -50,7 +50,7 @@ impl AudioEngine {
         maximum_callback_frames: usize,
     ) -> Result<()> {
         let render_buffer = AudioBuffer::new(maximum_callback_frames, format)?;
-        self.graph.prepare(format);
+        self.graph.prepare(format, maximum_callback_frames)?;
         self.render_buffer = render_buffer;
         Ok(())
     }
@@ -69,6 +69,9 @@ impl AudioEngine {
             AudioCommand::Stop => self.stop(),
             AudioCommand::SetOscillatorFrequency(frequency) => {
                 self.graph.apply_command(AudioGraphCommand::SetOscillatorFrequency(frequency));
+            }
+            AudioCommand::SetMasterGain(gain) => {
+                self.graph.apply_command(AudioGraphCommand::SetMasterGain(gain));
             }
         }
     }

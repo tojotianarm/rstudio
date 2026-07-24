@@ -23,6 +23,7 @@ pub trait AudioNode: Send {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AudioGraphCommand {
     SetOscillatorFrequency(f32),
+    SetMasterGain(f32),
 }
 
 pub struct OscillatorNode {
@@ -58,7 +59,7 @@ impl AudioNode for OscillatorNode {
         for frame in output.frames_mut() {
             let sample = self.oscillator.next_sample();
             for channel in frame {
-                *channel += sample;
+                *channel = sample;
             }
         }
     }
@@ -74,7 +75,131 @@ impl AudioNode for OscillatorNode {
             {
                 self.oscillator.set_frequency(frequency);
             }
-            AudioGraphCommand::SetOscillatorFrequency(_) => {}
+            AudioGraphCommand::SetOscillatorFrequency(_) | AudioGraphCommand::SetMasterGain(_) => {}
         }
+    }
+}
+
+/// Applies a finite, non-negative gain to one input bus.
+pub struct GainNode {
+    gain: f32,
+}
+
+impl GainNode {
+    pub fn new(gain: f32) -> Self {
+        let mut node = Self { gain: 1.0 };
+        node.set_gain(gain);
+        node
+    }
+
+    pub fn set_gain(&mut self, gain: f32) {
+        self.gain = if gain.is_finite() { gain.max(0.0) } else { 0.0 };
+    }
+
+    pub fn gain(&self) -> f32 {
+        self.gain
+    }
+}
+
+impl AudioNode for GainNode {
+    fn input_count(&self) -> usize {
+        1
+    }
+
+    fn output_count(&self) -> usize {
+        1
+    }
+
+    fn prepare(&mut self, _format: AudioFormat) {}
+
+    fn process(&mut self, inputs: &[AudioBlock<'_>], outputs: &mut [AudioBlockMut<'_>]) {
+        let output_count = outputs.len();
+        let Some(input) = inputs.first() else {
+            clear_first_output(outputs);
+            return;
+        };
+        let Some(output) = outputs.first_mut() else {
+            return;
+        };
+        if inputs.len() != self.input_count()
+            || output_count != self.output_count()
+            || input.format() != output.format()
+            || input.as_slice().len() != output.as_slice().len()
+        {
+            output.clear();
+            return;
+        }
+
+        for (destination, source) in output.as_mut_slice().iter_mut().zip(input.as_slice()) {
+            *destination =
+                if source.is_finite() { (*source * self.gain).clamp(-1.0, 1.0) } else { 0.0 };
+        }
+    }
+
+    fn reset(&mut self) {}
+
+    fn apply_command(&mut self, command: AudioGraphCommand) {
+        if let AudioGraphCommand::SetMasterGain(gain) = command {
+            self.set_gain(gain);
+        }
+    }
+}
+
+/// Mixes a fixed number of input buses into one saturated output bus.
+pub struct MixerNode {
+    input_count: usize,
+}
+
+impl MixerNode {
+    pub fn new(input_count: usize) -> Self {
+        Self { input_count }
+    }
+}
+
+impl AudioNode for MixerNode {
+    fn input_count(&self) -> usize {
+        self.input_count
+    }
+
+    fn output_count(&self) -> usize {
+        1
+    }
+
+    fn prepare(&mut self, _format: AudioFormat) {}
+
+    fn process(&mut self, inputs: &[AudioBlock<'_>], outputs: &mut [AudioBlockMut<'_>]) {
+        let output_count = outputs.len();
+        let Some(output) = outputs.first_mut() else {
+            return;
+        };
+        if inputs.len() != self.input_count() || output_count != self.output_count() {
+            output.clear();
+            return;
+        }
+        if inputs.iter().any(|input| {
+            input.format() != output.format() || input.as_slice().len() != output.as_slice().len()
+        }) {
+            output.clear();
+            return;
+        }
+
+        for (sample_index, destination) in output.as_mut_slice().iter_mut().enumerate() {
+            let mut mixed = 0.0;
+            for input in inputs {
+                let sample = input.as_slice()[sample_index];
+                if sample.is_finite() {
+                    mixed = (mixed + sample).clamp(-1.0, 1.0);
+                }
+            }
+            *destination = mixed;
+        }
+    }
+
+    fn reset(&mut self) {}
+}
+
+fn clear_first_output(outputs: &mut [AudioBlockMut<'_>]) {
+    if let Some(output) = outputs.first_mut() {
+        output.clear();
     }
 }

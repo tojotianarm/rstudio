@@ -16,15 +16,15 @@ AudioEngine API (hardware-independent)
 CPAL output stream adapter
  |
  v
-audio callback -> DSP oscillator -> output device
+audio callback -> AudioGraph (oscillator -> gain -> mixer) -> output device
 ```
 
 `AudioEngine` owns processing state and is moved into the CPAL callback. CPAL-specific device and stream management stays in `audio-engine::stream`; `dsp` has no CPAL dependency.
 
-Audio rendering now passes through a minimal `AudioGraph` with one `OscillatorNode`. CPAL's
-negotiated sample rate and channel count configure the graph before stream creation. The callback
-uses only preallocated graph buffers; an oversized callback is silenced and reported as an event
-rather than resizing memory.
+Audio rendering now passes through a minimal `AudioGraph` with `OscillatorNode`, `GainNode`, and
+`MixerNode`. CPAL's negotiated sample rate and channel count configure the graph and preallocate
+its intermediate buffers before stream creation. The callback uses no allocations, locks, or system
+access; an oversized callback is silenced and reported as an event rather than resizing memory.
 
 ## Implemented Features
 
@@ -33,7 +33,10 @@ rather than resizing memory.
 - Minimal real-time audio callback for `f32`, `i16`, and `u16` output devices.
 - Bounded lock-free command and event queues between the application and audio callback.
 - Typed stream creation and start errors.
-- Linear audio graph and extensible multi-input/multi-output `AudioNode` contract.
+- Linear `oscillator -> gain -> mixer -> output` graph with preallocated intermediate buffers.
+- Gain control through the bounded real-time command queue, plus saturated gain and mix output.
+- Extensible multi-input/multi-output `AudioNode` contract; `MixerNode` supports a fixed number
+  of input buses.
 
 ## Not Implemented Yet
 

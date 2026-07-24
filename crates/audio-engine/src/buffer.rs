@@ -67,10 +67,20 @@ impl AudioBuffer {
         AudioBlockMut { samples: &mut self.samples, format: self.format }
     }
 
+    pub fn block(&self) -> AudioBlock<'_> {
+        AudioBlock { samples: &self.samples, format: self.format }
+    }
+
     pub fn block_mut_for_frames(&mut self, frames: usize) -> Option<AudioBlockMut<'_>> {
         let sample_count = frames.checked_mul(self.format.channels())?;
         let samples = self.samples.get_mut(..sample_count)?;
         Some(AudioBlockMut { samples, format: self.format })
+    }
+
+    pub fn block_for_frames(&self, frames: usize) -> Option<AudioBlock<'_>> {
+        let sample_count = frames.checked_mul(self.format.channels())?;
+        let samples = self.samples.get(..sample_count)?;
+        Some(AudioBlock { samples, format: self.format })
     }
 }
 
@@ -107,6 +117,9 @@ impl<'a> AudioBlockMut<'a> {
         self.samples.fill(0.0);
     }
     pub fn as_slice(&self) -> &[f32] {
+        self.samples
+    }
+    pub fn as_mut_slice(&mut self) -> &mut [f32] {
         self.samples
     }
     pub fn as_block(&self) -> AudioBlock<'_> {
