@@ -1,5 +1,5 @@
-use crate::AudioBuffer;
-use common::config::AppConfig;
+use crate::{AudioBlockMut, AudioCommand};
+use common::{config::AppConfig, error::Result};
 use dsp::oscillator::Oscillator;
 
 pub struct AudioEngine {
@@ -9,12 +9,13 @@ pub struct AudioEngine {
 }
 
 impl AudioEngine {
-    pub fn new(config: AppConfig) -> Self {
-        Self {
+    pub fn new(config: AppConfig) -> Result<Self> {
+        config.validate()?;
+        Ok(Self {
             oscillator: Oscillator::new(440.0, config.sample_rate as f32),
             config,
             running: false,
-        }
+        })
     }
 
     pub fn start(&mut self) {
@@ -33,13 +34,26 @@ impl AudioEngine {
         &self.config
     }
 
-    pub fn next_sample(&mut self) -> f32 {
-        self.oscillator.next_sample()
+    pub fn process(&mut self, block: &mut AudioBlockMut<'_>) {
+        for frame in block.frames_mut() {
+            frame.fill(self.next_output_sample());
+        }
     }
 
-    pub fn process(&mut self, buffer: &mut AudioBuffer) {
-        for sample in buffer.as_mut_slice() {
-            *sample = self.next_sample();
+    pub(crate) fn apply_command(&mut self, command: AudioCommand) {
+        match command {
+            AudioCommand::Start => self.start(),
+            AudioCommand::Stop => self.stop(),
+            AudioCommand::SetOscillatorFrequency(frequency)
+                if frequency.is_finite() && frequency >= 0.0 =>
+            {
+                self.oscillator.set_frequency(frequency)
+            }
+            AudioCommand::SetOscillatorFrequency(_) => {}
         }
+    }
+
+    pub(crate) fn next_output_sample(&mut self) -> f32 {
+        if self.running { self.oscillator.next_sample() } else { 0.0 }
     }
 }

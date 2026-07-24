@@ -68,6 +68,10 @@ Responsible for:
 * Real-time processing
 * Transport system
 
+The crate separates the hardware-independent `AudioEngine` from its CPAL stream adapter. The engine owns DSP processing state; the adapter owns device discovery, stream construction, sample format conversion, and the CPAL callback.
+
+Application-to-audio commands and audio-to-application events use bounded lock-free queues. The callback only drains a bounded number of commands, renders samples, converts them to the device format, and attempts non-blocking event publication.
+
 ### dsp
 
 Responsible for:
@@ -83,13 +87,13 @@ Responsible for:
 The expected audio pipeline:
 
 ```text
-Audio Input
+Application Commands
      |
      v
-Audio Callback
+Audio Engine API
      |
      v
-Audio Engine
+CPAL Output Callback
      |
      v
 DSP Processing
