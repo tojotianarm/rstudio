@@ -107,7 +107,7 @@ impl AudioGraph {
                 self.clear_and_measure(output);
                 return;
             };
-            track.process(&mut track_output, scheduler.is_track_active(track.id(), position));
+            track.process(&mut track_output, &scheduler, position);
         }
 
         let Some(track_one) = self.track_buffers[0].block_for_frames(frames) else {

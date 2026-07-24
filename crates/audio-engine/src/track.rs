@@ -1,4 +1,7 @@
-use crate::{AudioBlockMut, AudioFormat, AudioGraphCommand, AudioNode, OscillatorNode};
+use crate::{
+    AudioBlockMut, AudioFormat, AudioGraphCommand, ClipScheduler, MAX_VOICES_PER_TRACK, SampleTime,
+    VoiceManager,
+};
 
 /// Stable numeric identifier for a track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -33,7 +36,7 @@ struct TrackRealtimeState {
     gain: f32,
     muted: bool,
     solo: bool,
-    source: OscillatorNode,
+    voices: VoiceManager<MAX_VOICES_PER_TRACK>,
 }
 
 impl Track {
@@ -44,7 +47,7 @@ impl Track {
                 gain: 1.0,
                 muted: false,
                 solo: false,
-                source: OscillatorNode::new(frequency, format),
+                voices: VoiceManager::new(frequency, format),
             },
         }
     }
@@ -82,17 +85,22 @@ impl Track {
     }
 
     pub fn prepare(&mut self, format: AudioFormat) {
-        self.realtime.source.prepare(format);
+        self.realtime.voices.prepare(format);
     }
 
-    /// Renders the source only when a scheduled clip activates this track.
-    pub fn process(&mut self, output: &mut AudioBlockMut<'_>, source_active: bool) {
-        if !source_active {
-            output.clear();
-            return;
-        }
-        self.realtime.source.process(&[], std::slice::from_mut(&mut *output));
+    /// Renders the fixed voice pool only for clips active in the immutable snapshot.
+    pub fn process(
+        &mut self,
+        output: &mut AudioBlockMut<'_>,
+        scheduler: &ClipScheduler<'_>,
+        position: SampleTime,
+    ) {
+        self.realtime.voices.process(output, scheduler, self.id(), position);
         self.apply_channel_state(output);
+    }
+
+    pub fn active_voice_count(&self) -> usize {
+        self.realtime.voices.active_voice_count()
     }
 
     fn apply_channel_state(&self, output: &mut AudioBlockMut<'_>) {
@@ -111,11 +119,11 @@ impl Track {
     }
 
     pub fn reset(&mut self) {
-        self.realtime.source.reset();
+        self.realtime.voices.reset();
     }
 
     pub fn apply_command(&mut self, command: AudioGraphCommand) {
-        self.realtime.source.apply_command(command);
+        self.realtime.voices.apply_command(command);
     }
 }
 

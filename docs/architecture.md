@@ -91,12 +91,20 @@ to two tracks and sixteen clips per track, avoiding allocation, reference-count 
 dynamic timeline traversal in the audio thread.
 
 `AudioEngine` delegates rendering to an `AudioGraph` with two fixed `Track` channels. Each track
-owns a source and channel state (gain, mute, solo flag), and writes to its own preallocated output
-buffer only while the scheduler reports an active clip for that track. Inactive tracks produce
-silence. The graph passes both buffers to `MixerNode(2)`, then routes the mix through `MasterBus`.
+owns channel state (gain, mute, solo flag) and a fixed `VoiceManager<8>`. A voice owns an
+`OscillatorNode` and is assigned to one active `ClipPlayback`; overlapping clips therefore render
+through distinct voice slots. The scheduler is queried only against the immutable snapshot, then
+the manager reconciles and mixes its bounded voice pool into the track's preallocated output
+buffer. Inactive slots produce silence. The graph passes both track buffers to `MixerNode(2)`, then routes the mix through `MasterBus`.
 `TrackId` is a stable numeric key for targeted queue commands; track names are configuration data
 and are never read in the callback. `SetTrackGain`, `SetTrackMute`, and `SetTrackSolo` scan only
 the fixed track array, without maps, locks, or allocation.
+
+Voice capacity is selected when each track is built, rather than resized while rendering. At this
+stage, excess simultaneous clips are left unassigned once the pool is full; voice stealing and
+runtime polyphony reconfiguration require a future non-real-time graph/snapshot rebuild. Clip
+activation is currently evaluated at block boundaries, so the next sequencing step must add
+sample-accurate starts and stops inside a rendered block.
 
 `MasterBus` applies final gain and is the future insertion point for limiter, EQ, or compression.
 All track, mix, and master buffers are allocated before the stream starts, so callback execution
@@ -140,7 +148,7 @@ Timeline -> SnapshotCompiler -> immutable AudioSnapshot
 CPAL output callback
      |
      v
-AudioGraph: scheduler -> track 1 + track 2 -> mixer -> master bus -> meter
+AudioGraph: scheduler -> per-track VoiceManager -> mixer -> master bus -> meter
      |
      v
 Audio Output

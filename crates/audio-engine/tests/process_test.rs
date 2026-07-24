@@ -190,6 +190,35 @@ fn clip_player_silences_inactive_tracks_and_plays_active_tracks() {
     assert!(output.as_slice().iter().all(|sample| sample.is_finite()));
 }
 
+#[test]
+fn overlapping_clips_render_through_the_polyphonic_track_pipeline() {
+    let format = AudioFormat::new(48_000, 1).expect("valid mono format");
+    let mut graph =
+        AudioGraph::with_oscillator(format, 64, 440.0).expect("graph buffers are valid");
+    let mut timeline = Timeline::new();
+    timeline.add_clip(AudioClip::new(
+        ClipId::new(1),
+        TrackId::new(1),
+        SampleTime::new(0),
+        SampleTime::new(10_000),
+    ));
+    timeline.add_clip(AudioClip::new(
+        ClipId::new(2),
+        TrackId::new(1),
+        SampleTime::new(5_000),
+        SampleTime::new(10_000),
+    ));
+    graph.set_snapshot(AudioSnapshot::compile(&timeline).expect("valid timeline compiles"));
+    let mut output = AudioBuffer::new(64, format).expect("buffer dimensions are valid");
+
+    graph.process(&mut output.block_mut(), SampleTime::new(6_000));
+
+    assert_eq!(output.frames(), 64);
+    assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
+    assert!(output.as_slice().iter().all(|sample| sample.is_finite()));
+    assert!(output.as_slice().iter().all(|sample| (-1.0..=1.0).contains(sample)));
+}
+
 fn process_gain(gain_value: f32) -> [f32; 2] {
     let format = AudioFormat::new(48_000, 1).expect("valid mono format");
     let mut input = AudioBuffer::new(2, format).expect("buffer dimensions are valid");

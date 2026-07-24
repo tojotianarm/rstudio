@@ -212,3 +212,24 @@ Heap-backed snapshots, reference-counted swaps, and mutable timelines can alloca
 memory in the audio callback. Fixed-capacity values avoid that risk while providing deterministic
 clip scheduling. The initial limits are two tracks and sixteen clips per track; future growth must
 preserve the same real-time publication guarantees.
+
+---
+
+# ADR-011: Fixed-Capacity Per-Track Voice Pools
+
+Date: 2026-07-24
+
+## Decision
+
+Assign active `ClipPlayback` entries to preallocated `VoiceManager<N>` slots owned by each fixed
+track. Each `Voice` owns its oscillator DSP state and is activated or released in place by the
+audio callback. The initial graph uses eight slots per track.
+
+## Reason
+
+Overlapping clips need independent source state, but dynamically creating, destroying, or
+resizing voices in the callback could allocate or run unpredictable destructors. A fixed pool
+makes all pool scans and rendering bounded. The audio callback reads only `AudioSnapshot` data,
+uses no locks, and mixes active voices directly into the existing track buffer. Capacity changes,
+voice stealing, and sample-accurate intra-block scheduling remain explicit future work rather than
+hidden real-time behavior.

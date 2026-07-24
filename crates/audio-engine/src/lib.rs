@@ -9,6 +9,7 @@ pub mod stream;
 pub mod timeline;
 pub mod track;
 pub mod transport;
+pub mod voice;
 
 pub use buffer::{AudioBlock, AudioBlockMut, AudioBuffer, AudioFormat};
 pub use engine::AudioEngine;
@@ -27,6 +28,7 @@ pub use stream::{
 pub use timeline::{AudioClip, ClipId, SampleTime, Timeline, TimelineCommand};
 pub use track::{Track, TrackId};
 pub use transport::{Transport, TransportState};
+pub use voice::{MAX_VOICES_PER_TRACK, Voice, VoiceId, VoiceManager};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AudioCommand {
