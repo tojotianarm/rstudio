@@ -9,7 +9,19 @@ impl AudioBuffer {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.samples.fill(0.0);
+    }
+
     pub fn len(&self) -> usize {
         self.samples.len()
+    }
+
+    pub fn as_slice(&self) -> &[f32] {
+        &self.samples
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [f32] {
+        &mut self.samples
     }
 }
