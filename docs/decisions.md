@@ -160,3 +160,37 @@ playing. Exchange transport commands and snapshots through the existing bounded 
 The audio thread is the authoritative source for sample position. Keeping the state there avoids
 locks and clock drift between the application and hardware callback while preserving a future path
 to timeline, MIDI, clip, and automation scheduling.
+
+---
+
+# ADR-008: Fixed Two-Track Graph
+
+Date: 2026-07-24
+
+## Decision
+
+Use two fixed, preallocated `Track` channels as the first DAW-level graph topology. Route both
+track outputs through a two-input mixer and the existing master bus.
+
+## Reason
+
+Tracks establish independent channel state and targeted controls without introducing dynamic
+routing, callback-time allocation, maps, or synchronization. A future graph planner can replace
+this bounded topology when track creation and routing become application-level operations.
+
+---
+
+# ADR-009: Non-Real-Time Timeline Model
+
+Date: 2026-07-24
+
+## Decision
+
+Keep editable clip and timeline data outside the audio callback. Represent positions and lengths
+as integer sample counts, and expose active clips through a non-allocating iterator.
+
+## Reason
+
+Timeline edits can grow or compact a `Vec`, which is forbidden in the callback. This creates a
+clear separation between project editing and future playback scheduling, where a preallocated
+immutable snapshot will be required for the audio thread.

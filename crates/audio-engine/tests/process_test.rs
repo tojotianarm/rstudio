@@ -148,7 +148,7 @@ fn audio_meter_measures_peak_and_rms_for_a_block() {
 }
 
 #[test]
-fn complete_graph_pipeline_outputs_valid_samples_within_preallocated_capacity() {
+fn track_mixer_master_pipeline_outputs_valid_samples_within_preallocated_capacity() {
     let format = AudioFormat::new(48_000, 2).expect("valid stereo format");
     let mut graph =
         AudioGraph::with_oscillator(format, 64, 440.0).expect("graph buffers are valid");

@@ -79,12 +79,23 @@ is derived from BPM through explicit beat-to-sample helpers. `Play`, `Pause`, `S
 are consumed from the existing command queue, and `TransportUpdate` is published best-effort from
 the callback. The transport does not yet alter graph processing or schedule clips.
 
-`AudioEngine` delegates rendering to an `AudioGraph`. The initial graph is a fixed linear chain:
-`OscillatorNode -> GainNode -> MixerNode -> MasterBus -> output`. The graph owns preallocated
-intermediate buffers for every link before the final output, so execution in the callback neither
-allocates nor resizes memory. `MasterBus` applies the final gain and is the future insertion point
-for master effects such as a limiter, EQ, or compressor. `SetMasterGain` travels through the
-existing bounded command queue and is consumed only by `MasterBus`.
+`Timeline` is a separate non-real-time project model. It stores sample-accurate `AudioClip`
+metadata associated with `TrackId`, and resolves active clips from a transport position without
+reading audio files. Clip edits use `TimelineCommand` outside the callback because adding or
+removing from its `Vec` can allocate or move data. The current audio graph deliberately does not
+query this model; a future sequencer will publish an immutable, preallocated playback snapshot to
+the audio thread.
+
+`AudioEngine` delegates rendering to an `AudioGraph` with two fixed `Track` channels. Each track
+owns a source and channel state (gain, mute, solo flag), and writes to its own preallocated output
+buffer. The graph passes both buffers to `MixerNode(2)`, then routes the mix through `MasterBus`.
+`TrackId` is a stable numeric key for targeted queue commands; track names are configuration data
+and are never read in the callback. `SetTrackGain`, `SetTrackMute`, and `SetTrackSolo` scan only
+the fixed track array, without maps, locks, or allocation.
+
+`MasterBus` applies final gain and is the future insertion point for limiter, EQ, or compression.
+All track, mix, and master buffers are allocated before the stream starts, so callback execution
+neither allocates nor resizes memory.
 
 The graph measures the signal after `MasterBus` on every rendered block. `AudioMeter` computes
 peak and RMS without temporary buffers, then the CPAL adapter publishes a best-effort
@@ -120,10 +131,13 @@ Audio Engine API
 Transport
      |
      v
+Timeline model (non-real-time)
+     |
+     v
 CPAL output callback
      |
      v
-AudioGraph: oscillator -> gain -> mixer -> master bus -> meter
+AudioGraph: track 1 + track 2 -> mixer -> master bus -> meter
      |
      v
 Audio Output

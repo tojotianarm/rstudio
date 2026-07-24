@@ -75,6 +75,27 @@ impl Transport {
         samples as f64 / f64::from(self.sample_rate)
     }
 
+    pub fn seconds_to_samples(&self, seconds: f64) -> u64 {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return 0;
+        }
+
+        let samples = seconds * f64::from(self.sample_rate);
+        if !samples.is_finite() || samples >= u64::MAX as f64 {
+            u64::MAX
+        } else {
+            samples.round() as u64
+        }
+    }
+
+    pub fn seconds_to_beats(&self, seconds: f64) -> f64 {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return 0.0;
+        }
+
+        seconds * self.bpm / 60.0
+    }
+
     pub fn beats_to_samples(&self, beats: f64) -> u64 {
         if !beats.is_finite() || beats <= 0.0 {
             return 0;
@@ -144,6 +165,8 @@ mod tests {
         let transport = Transport::new(48_000);
 
         assert_eq!(transport.samples_to_seconds(48_000), 1.0);
+        assert_eq!(transport.seconds_to_samples(1.0), 48_000);
+        assert_eq!(transport.seconds_to_beats(0.5), 1.0);
         assert_eq!(transport.beats_to_samples(1.0), 24_000);
     }
 }
