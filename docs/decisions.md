@@ -194,3 +194,21 @@ as integer sample counts, and expose active clips through a non-allocating itera
 Timeline edits can grow or compact a `Vec`, which is forbidden in the callback. This creates a
 clear separation between project editing and future playback scheduling, where a preallocated
 immutable snapshot will be required for the audio thread.
+
+---
+
+# ADR-010: Fixed-Capacity Audio Snapshots
+
+Date: 2026-07-24
+
+## Decision
+
+Compile editable timeline data into fixed-size, copyable audio snapshots and transfer them through
+a bounded lock-free queue. The audio callback consumes only the latest immutable snapshot.
+
+## Reason
+
+Heap-backed snapshots, reference-counted swaps, and mutable timelines can allocate or release
+memory in the audio callback. Fixed-capacity values avoid that risk while providing deterministic
+clip scheduling. The initial limits are two tracks and sixteen clips per track; future growth must
+preserve the same real-time publication guarantees.

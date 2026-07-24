@@ -1,14 +1,15 @@
 use common::error::Result;
 
+use crate::snapshot::AudioSnapshotReceiver;
 use crate::{
-    AudioBlockMut, AudioBuffer, AudioFormat, AudioGraphCommand, AudioMeter, AudioNode, MasterBus,
-    MixerNode, Track, TrackId,
+    AudioBlockMut, AudioBuffer, AudioFormat, AudioGraphCommand, AudioMeter, AudioNode,
+    AudioSnapshot, ClipScheduler, MasterBus, MixerNode, SampleTime, Track, TrackId,
 };
 
 /// Fixed first-stage DAW graph with two independent track channels.
 ///
-/// Tracks and all their buffers are created before stream startup. The graph deliberately has no
-/// dynamic routing yet: its bounded topology keeps execution predictable in the audio callback.
+/// The graph reads only its immutable compiled snapshot during rendering. Timeline editing and
+/// snapshot compilation happen outside the audio callback.
 pub struct AudioGraph {
     format: AudioFormat,
     tracks: [Track; 2],
@@ -18,6 +19,8 @@ pub struct AudioGraph {
     master_bus: MasterBus,
     maximum_block_frames: usize,
     meter: AudioMeter,
+    snapshot: AudioSnapshot,
+    snapshot_receiver: Option<AudioSnapshotReceiver>,
 }
 
 impl AudioGraph {
@@ -43,6 +46,8 @@ impl AudioGraph {
             master_bus: MasterBus::new(1.0),
             maximum_block_frames,
             meter: AudioMeter::default(),
+            snapshot: AudioSnapshot::prototype(),
+            snapshot_receiver: None,
         };
         graph.prepare(format, maximum_block_frames)?;
         Ok(graph)
@@ -54,6 +59,14 @@ impl AudioGraph {
 
     pub fn meter(&self) -> AudioMeter {
         self.meter
+    }
+
+    pub fn set_snapshot(&mut self, snapshot: AudioSnapshot) {
+        self.snapshot = snapshot;
+    }
+
+    pub(crate) fn set_snapshot_receiver(&mut self, receiver: AudioSnapshotReceiver) {
+        self.snapshot_receiver = Some(receiver);
     }
 
     /// Allocates every render buffer before the audio stream begins.
@@ -76,19 +89,25 @@ impl AudioGraph {
         Ok(())
     }
 
-    pub fn process(&mut self, output: &mut AudioBlockMut<'_>) {
+    pub fn process(&mut self, output: &mut AudioBlockMut<'_>, position: SampleTime) {
+        if let Some(receiver) = &self.snapshot_receiver
+            && let Some(snapshot) = receiver.take_latest()
+        {
+            self.snapshot = snapshot;
+        }
         if output.format() != self.format || output.frames() > self.maximum_block_frames {
             self.clear_and_measure(output);
             return;
         }
 
         let frames = output.frames();
+        let scheduler = ClipScheduler::new(&self.snapshot);
         for (track, buffer) in self.tracks.iter_mut().zip(&mut self.track_buffers) {
             let Some(mut track_output) = buffer.block_mut_for_frames(frames) else {
                 self.clear_and_measure(output);
                 return;
             };
-            track.process(&mut track_output);
+            track.process(&mut track_output, scheduler.is_track_active(track.id(), position));
         }
 
         let Some(track_one) = self.track_buffers[0].block_for_frames(frames) else {

@@ -16,7 +16,7 @@ AudioEngine API (hardware-independent)
 CPAL output stream adapter
  |
  v
-audio callback -> Transport -> AudioGraph (tracks -> mixer -> master bus -> meter) -> output device
+audio callback -> Transport -> Snapshot scheduler -> AudioGraph -> output device
 ```
 
 `AudioEngine` owns processing state and is moved into the CPAL callback. CPAL-specific device and stream management stays in `audio-engine::stream`; `dsp` has no CPAL dependency.
@@ -34,11 +34,12 @@ conversion using the negotiated sample rate and BPM. Transport commands and best
 updates use the existing bounded lock-free queues. It does not yet drive clips, automation, MIDI,
 or graph scheduling.
 
-`Timeline` and `AudioClip` now provide the non-real-time, sample-accurate project model for
-placing future events on tracks. A clip records its ID, track ID, start position, and length;
-timeline queries resolve active clips for a sample position. This model is intentionally outside
-the callback because editable `Vec` storage can allocate. It does not yet trigger sources or read
-audio files.
+`Timeline` and `AudioClip` provide the non-real-time, sample-accurate project model for placing
+events on tracks. `SnapshotCompiler` converts that editable data into an immutable fixed-capacity
+`AudioSnapshot`, transferred through a bounded lock-free queue. The callback consults only the
+current snapshot via `ClipScheduler`; it never traverses the editable timeline. Active clips start
+the prototype oscillator source for their track, while inactive tracks render silence. No audio
+files are read yet.
 
 ## Implemented Features
 
@@ -53,13 +54,14 @@ audio files.
 - Per-block peak/RMS metering emitted through the bounded event queue.
 - Sample-accurate transport state with play, pause, stop, seek, BPM, and time conversions.
 - Sample-accurate clips and non-real-time timeline queries, ready for a future sequencer.
+- Immutable fixed-capacity snapshots, lock-free snapshot publication, and clip scheduling.
 - Extensible multi-input/multi-output `AudioNode` contract; `MixerNode` supports a fixed number
   of input buses.
 
 ## Not Implemented Yet
 
 - Input streams and recording.
-- Dynamic graph routing, scheduled clip playback, and a timeline-to-audio snapshot mechanism.
+- Dynamic graph routing, audio-file clip playback, and scalable snapshot capacities.
 - Device selection, device-change recovery, and negotiated fixed buffer size.
 - MIDI, UI, project persistence, plugins, effects, and automation.
 - Real-time performance benchmarks and hardware integration tests.

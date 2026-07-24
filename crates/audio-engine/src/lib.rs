@@ -4,6 +4,7 @@ pub mod engine;
 pub mod graph;
 pub mod meter;
 pub mod node;
+pub mod snapshot;
 pub mod stream;
 pub mod timeline;
 pub mod track;
@@ -14,6 +15,11 @@ pub use engine::AudioEngine;
 pub use graph::AudioGraph;
 pub use meter::AudioMeter;
 pub use node::{AudioGraphCommand, AudioNode, GainNode, MasterBus, MixerNode, OscillatorNode};
+pub use snapshot::{
+    AudioSnapshot, AudioSnapshotSender, AudioTrackSnapshot, ClipPlayback, ClipScheduler,
+    MAX_CLIPS_PER_TRACK, SNAPSHOT_TRACK_COUNT, SnapshotCompileError, SnapshotCompiler,
+    SnapshotPublishError, audio_snapshot_exchange,
+};
 pub use stream::{
     AudioCommandSender, AudioEventReceiver, AudioStreamError, CpalOutputStream, DeviceBufferSize,
     OutputDeviceInfo,

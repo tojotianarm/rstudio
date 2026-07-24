@@ -85,8 +85,12 @@ impl Track {
         self.realtime.source.prepare(format);
     }
 
-    /// Renders the source and applies the track channel state without allocating.
-    pub fn process(&mut self, output: &mut AudioBlockMut<'_>) {
+    /// Renders the source only when a scheduled clip activates this track.
+    pub fn process(&mut self, output: &mut AudioBlockMut<'_>, source_active: bool) {
+        if !source_active {
+            output.clear();
+            return;
+        }
         self.realtime.source.process(&[], std::slice::from_mut(&mut *output));
         self.apply_channel_state(output);
     }

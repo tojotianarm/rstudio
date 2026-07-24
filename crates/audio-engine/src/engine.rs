@@ -1,6 +1,7 @@
+use crate::snapshot::AudioSnapshotReceiver;
 use crate::{
     AudioBlockMut, AudioBuffer, AudioCommand, AudioFormat, AudioGraph, AudioGraphCommand,
-    AudioMeter, Transport, TransportState,
+    AudioMeter, SampleTime, Transport, TransportState,
 };
 use common::{config::AppConfig, error::Result};
 
@@ -50,6 +51,10 @@ impl AudioEngine {
         self.transport.state()
     }
 
+    pub(crate) fn set_snapshot_receiver(&mut self, receiver: AudioSnapshotReceiver) {
+        self.graph.set_snapshot_receiver(receiver);
+    }
+
     /// Configures the graph from the format negotiated with the output device.
     ///
     /// This method may allocate its fixed render buffer and must only run before the stream starts.
@@ -67,7 +72,7 @@ impl AudioEngine {
 
     pub fn process(&mut self, block: &mut AudioBlockMut<'_>) {
         if self.running {
-            self.graph.process(block);
+            self.graph.process(block, SampleTime::from(self.transport.position_samples()));
             self.transport.advance(block.frames());
         } else {
             block.clear();
@@ -123,7 +128,8 @@ impl AudioEngine {
             return None;
         };
         let meter = if self.running {
-            self.graph.process(&mut render_block);
+            self.graph
+                .process(&mut render_block, SampleTime::from(self.transport.position_samples()));
             self.transport.advance(frames);
             self.graph.meter()
         } else {

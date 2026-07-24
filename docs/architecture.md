@@ -80,15 +80,20 @@ are consumed from the existing command queue, and `TransportUpdate` is published
 the callback. The transport does not yet alter graph processing or schedule clips.
 
 `Timeline` is a separate non-real-time project model. It stores sample-accurate `AudioClip`
-metadata associated with `TrackId`, and resolves active clips from a transport position without
-reading audio files. Clip edits use `TimelineCommand` outside the callback because adding or
-removing from its `Vec` can allocate or move data. The current audio graph deliberately does not
-query this model; a future sequencer will publish an immutable, preallocated playback snapshot to
-the audio thread.
+metadata associated with `TrackId`; editing it may allocate or move its `Vec` and therefore never
+happens in the callback. `SnapshotCompiler` converts it into an immutable fixed-capacity
+`AudioSnapshot`: each `ClipPlayback` contains precomputed start and end sample positions.
+
+The application publishes snapshots through a bounded lock-free queue. The callback consumes only
+fixed-size snapshot values and retains its current one when no update is available. `ClipScheduler`
+then determines active clips at the current transport position. This first version bounds playback
+to two tracks and sixteen clips per track, avoiding allocation, reference-count destruction, or
+dynamic timeline traversal in the audio thread.
 
 `AudioEngine` delegates rendering to an `AudioGraph` with two fixed `Track` channels. Each track
 owns a source and channel state (gain, mute, solo flag), and writes to its own preallocated output
-buffer. The graph passes both buffers to `MixerNode(2)`, then routes the mix through `MasterBus`.
+buffer only while the scheduler reports an active clip for that track. Inactive tracks produce
+silence. The graph passes both buffers to `MixerNode(2)`, then routes the mix through `MasterBus`.
 `TrackId` is a stable numeric key for targeted queue commands; track names are configuration data
 and are never read in the callback. `SetTrackGain`, `SetTrackMute`, and `SetTrackSolo` scan only
 the fixed track array, without maps, locks, or allocation.
@@ -102,10 +107,8 @@ peak and RMS without temporary buffers, then the CPAL adapter publishes a best-e
 `AudioEvent::MeterUpdate` through the existing bounded lock-free event queue. Events may be
 dropped when that queue is full; the callback never blocks to publish metering data.
 
-Its `Vec<Box<dyn AudioNode>>` is a deliberately limited, pre-stream abstraction: topology never
-changes in the callback and it is not the final DAW graph model. The node contract receives input
-and output bus slices (and declares their counts), so a future planner can introduce routing and
-multiple buses without changing the processing interface.
+The topology is deliberately fixed in this version; a future graph planner can extend routing and
+track counts only through preallocated playback data and a safe snapshot publication protocol.
 
 ### dsp
 
@@ -131,13 +134,13 @@ Audio Engine API
 Transport
      |
      v
-Timeline model (non-real-time)
+Timeline -> SnapshotCompiler -> immutable AudioSnapshot
      |
      v
 CPAL output callback
      |
      v
-AudioGraph: track 1 + track 2 -> mixer -> master bus -> meter
+AudioGraph: scheduler -> track 1 + track 2 -> mixer -> master bus -> meter
      |
      v
 Audio Output

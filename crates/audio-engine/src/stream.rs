@@ -7,7 +7,10 @@ use cpal::{
 use crossbeam_queue::ArrayQueue;
 use thiserror::Error;
 
-use crate::{AudioCommand, AudioEngine, AudioEvent, AudioFormat};
+use crate::{
+    AudioCommand, AudioEngine, AudioEvent, AudioFormat, AudioSnapshotSender,
+    audio_snapshot_exchange,
+};
 
 const COMMAND_QUEUE_CAPACITY: usize = 256;
 const EVENT_QUEUE_CAPACITY: usize = 256;
@@ -80,6 +83,7 @@ pub struct CpalOutputStream {
     device_info: OutputDeviceInfo,
     commands: AudioCommandSender,
     events: AudioEventReceiver,
+    snapshots: AudioSnapshotSender,
 }
 
 impl CpalOutputStream {
@@ -102,6 +106,8 @@ impl CpalOutputStream {
         engine
             .configure_output(format, maximum_callback_frames)
             .map_err(AudioStreamError::EngineConfiguration)?;
+        let (snapshots, snapshot_receiver) = audio_snapshot_exchange();
+        engine.set_snapshot_receiver(snapshot_receiver);
         let commands = Arc::new(ArrayQueue::new(COMMAND_QUEUE_CAPACITY));
         let events = Arc::new(ArrayQueue::new(EVENT_QUEUE_CAPACITY));
         let stream = build_stream(
@@ -117,6 +123,7 @@ impl CpalOutputStream {
             device_info,
             commands: AudioCommandSender { commands },
             events: AudioEventReceiver { events },
+            snapshots,
         })
     }
 
@@ -128,6 +135,9 @@ impl CpalOutputStream {
     }
     pub fn events(&self) -> &AudioEventReceiver {
         &self.events
+    }
+    pub fn snapshots(&self) -> AudioSnapshotSender {
+        self.snapshots.clone()
     }
     pub fn start(&self) -> Result<(), AudioStreamError> {
         self.commands.try_send(AudioCommand::Start)?;

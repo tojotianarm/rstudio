@@ -1,6 +1,7 @@
 use audio_engine::{
-    AudioBuffer, AudioEngine, AudioFormat, AudioGraph, AudioGraphCommand, AudioMeter, AudioNode,
-    GainNode, MasterBus, MixerNode,
+    AudioBuffer, AudioClip, AudioEngine, AudioFormat, AudioGraph, AudioGraphCommand, AudioMeter,
+    AudioNode, AudioSnapshot, ClipId, GainNode, MasterBus, MixerNode, SampleTime, Timeline,
+    TrackId,
 };
 use common::config::AppConfig;
 
@@ -49,7 +50,7 @@ fn linear_graph_renders_an_oscillator_to_its_output_bus() {
         AudioGraph::with_oscillator(format, 64, 440.0).expect("graph buffers are valid");
     let mut output = AudioBuffer::new(64, format).expect("buffer dimensions are valid");
 
-    graph.process(&mut output.block_mut());
+    graph.process(&mut output.block_mut(), SampleTime::new(0));
 
     assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
     assert!(output.as_slice().chunks_exact(2).all(|frame| frame[0] == frame[1]));
@@ -112,7 +113,7 @@ fn graph_routes_oscillator_through_master_bus() {
     let mut output = AudioBuffer::new(64, format).expect("buffer dimensions are valid");
     graph.apply_command(AudioGraphCommand::SetMasterGain(0.0));
 
-    graph.process(&mut output.block_mut());
+    graph.process(&mut output.block_mut(), SampleTime::new(0));
 
     assert!(output.as_slice().iter().all(|sample| *sample == 0.0));
 }
@@ -154,7 +155,7 @@ fn track_mixer_master_pipeline_outputs_valid_samples_within_preallocated_capacit
         AudioGraph::with_oscillator(format, 64, 440.0).expect("graph buffers are valid");
     let mut output = AudioBuffer::new(64, format).expect("buffer dimensions are valid");
 
-    graph.process(&mut output.block_mut());
+    graph.process(&mut output.block_mut(), SampleTime::new(0));
 
     assert_eq!(output.frames(), 64);
     assert_eq!(output.format(), format);
@@ -162,6 +163,31 @@ fn track_mixer_master_pipeline_outputs_valid_samples_within_preallocated_capacit
     assert!(output.as_slice().iter().all(|sample| (-1.0..=1.0).contains(sample)));
     assert!(graph.meter().peak().is_finite());
     assert!(graph.meter().rms().is_finite());
+}
+
+#[test]
+fn clip_player_silences_inactive_tracks_and_plays_active_tracks() {
+    let format = AudioFormat::new(48_000, 1).expect("valid mono format");
+    let mut graph =
+        AudioGraph::with_oscillator(format, 64, 440.0).expect("graph buffers are valid");
+    let mut output = AudioBuffer::new(64, format).expect("buffer dimensions are valid");
+
+    graph.set_snapshot(AudioSnapshot::compile(&Timeline::new()).expect("empty timeline compiles"));
+    graph.process(&mut output.block_mut(), SampleTime::new(0));
+    assert!(output.as_slice().iter().all(|sample| *sample == 0.0));
+
+    let mut timeline = Timeline::new();
+    timeline.add_clip(AudioClip::new(
+        ClipId::new(1),
+        TrackId::new(1),
+        SampleTime::new(0),
+        SampleTime::new(1_000),
+    ));
+    graph.set_snapshot(AudioSnapshot::compile(&timeline).expect("valid timeline compiles"));
+    graph.process(&mut output.block_mut(), SampleTime::new(0));
+
+    assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
+    assert!(output.as_slice().iter().all(|sample| sample.is_finite()));
 }
 
 fn process_gain(gain_value: f32) -> [f32; 2] {
