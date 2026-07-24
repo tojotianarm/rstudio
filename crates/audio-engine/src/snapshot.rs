@@ -160,13 +160,17 @@ impl<'a> ClipScheduler<'a> {
         track_id: TrackId,
         position: SampleTime,
     ) -> impl Iterator<Item = ClipPlayback> + '_ {
+        self.track_clips(track_id).filter(move |clip| clip.is_active_at(position))
+    }
+
+    /// Iterates precompiled clips for one track without accessing the editable timeline.
+    pub fn track_clips(&self, track_id: TrackId) -> impl Iterator<Item = ClipPlayback> + '_ {
         self.snapshot
             .track(track_id)
             .into_iter()
             .flat_map(AudioTrackSnapshot::clips)
             .flatten()
             .copied()
-            .filter(move |clip| clip.is_active_at(position))
     }
 
     pub fn is_track_active(&self, track_id: TrackId, position: SampleTime) -> bool {

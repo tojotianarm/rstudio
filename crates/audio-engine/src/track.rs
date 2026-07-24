@@ -1,6 +1,6 @@
 use crate::{
-    AudioBlockMut, AudioFormat, AudioGraphCommand, ClipScheduler, MAX_VOICES_PER_TRACK, SampleTime,
-    VoiceManager,
+    AudioBlockMut, AudioFormat, AudioGraphCommand, ClipScheduler, EventScheduler,
+    MAX_SCHEDULED_EVENTS_PER_TRACK, MAX_VOICES_PER_TRACK, SampleTime, VoiceManager,
 };
 
 /// Stable numeric identifier for a track.
@@ -37,6 +37,7 @@ struct TrackRealtimeState {
     muted: bool,
     solo: bool,
     voices: VoiceManager<MAX_VOICES_PER_TRACK>,
+    event_scheduler: EventScheduler<MAX_SCHEDULED_EVENTS_PER_TRACK>,
 }
 
 impl Track {
@@ -48,6 +49,7 @@ impl Track {
                 muted: false,
                 solo: false,
                 voices: VoiceManager::new(frequency, format),
+                event_scheduler: EventScheduler::new(),
             },
         }
     }
@@ -95,7 +97,10 @@ impl Track {
         scheduler: &ClipScheduler<'_>,
         position: SampleTime,
     ) {
-        self.realtime.voices.process(output, scheduler, self.id(), position);
+        let track_id = self.id();
+        let events =
+            self.realtime.event_scheduler.schedule(scheduler, track_id, position, output.frames());
+        self.realtime.voices.process(output, events, scheduler, track_id, position);
         self.apply_channel_state(output);
     }
 

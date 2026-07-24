@@ -35,17 +35,15 @@ impl OscillatorNode {
         Self { oscillator: Oscillator::new(frequency, format.sample_rate() as f32) }
     }
 
-    /// Adds this oscillator's next samples to an existing output bus.
+    /// Adds one generated sample to every channel of an interleaved frame.
     ///
     /// This is used by the fixed voice pool. It deliberately does not allocate and keeps the
     /// oscillator state local to the audio thread.
-    pub(crate) fn render_add(&mut self, output: &mut AudioBlockMut<'_>) {
-        for frame in output.frames_mut() {
-            let sample = self.oscillator.next_sample();
-            let sample = if sample.is_finite() { sample } else { 0.0 };
-            for channel in frame {
-                *channel = (*channel + sample).clamp(-1.0, 1.0);
-            }
+    pub(crate) fn render_frame_add(&mut self, frame: &mut [f32]) {
+        let sample = self.oscillator.next_sample();
+        let sample = if sample.is_finite() { sample } else { 0.0 };
+        for channel in frame {
+            *channel = (*channel + sample).clamp(-1.0, 1.0);
         }
     }
 }

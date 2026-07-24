@@ -1,7 +1,7 @@
 use crate::OscillatorNode;
 use crate::{
     AudioBlockMut, AudioFormat, AudioGraphCommand, AudioNode, ClipId, ClipPlayback, ClipScheduler,
-    SampleTime, TrackId,
+    SampleTime, ScheduledEvent, TrackId, VoiceEvent,
 };
 
 /// Default bounded polyphony for one fixed track.
@@ -78,9 +78,9 @@ impl Voice {
         self.deactivate();
     }
 
-    fn process(&mut self, output: &mut AudioBlockMut<'_>) {
+    fn render_frame(&mut self, frame: &mut [f32]) {
         if self.is_active() {
-            self.source.render_add(output);
+            self.source.render_frame_add(frame);
         }
     }
 
@@ -120,11 +120,12 @@ impl<const N: usize> VoiceManager<N> {
         }
     }
 
-    /// Reconciles the fixed voice pool with active snapshot clips and mixes every active voice.
+    /// Applies events immediately before their target frames and renders the active voice pool.
     /// All searches are bounded by `N` and the fixed snapshot capacity; no collection is built.
     pub fn process(
         &mut self,
         output: &mut AudioBlockMut<'_>,
+        events: &[ScheduledEvent],
         scheduler: &ClipScheduler<'_>,
         track_id: TrackId,
         position: SampleTime,
@@ -140,17 +141,41 @@ impl<const N: usize> VoiceManager<N> {
             }
         }
 
-        for clip in scheduler.active_clips(track_id, position) {
-            let assigned = self.voices.iter().any(|voice| voice.clip_id() == Some(clip.clip_id()));
-            if !assigned
-                && let Some(voice) = self.voices.iter_mut().find(|voice| !voice.is_active())
-            {
-                voice.activate(clip);
+        let mut event_index = 0;
+        for (frame_index, frame) in output.frames_mut().enumerate() {
+            while let Some(event) = events.get(event_index) {
+                if event.sample_offset() != frame_index {
+                    break;
+                }
+                self.apply_event(event.event());
+                event_index += 1;
+            }
+
+            for voice in &mut self.voices {
+                voice.render_frame(frame);
             }
         }
+    }
 
-        for voice in &mut self.voices {
-            voice.process(output);
+    fn apply_event(&mut self, event: VoiceEvent) {
+        match event {
+            VoiceEvent::StartVoice(clip) => self.start_voice(clip),
+            VoiceEvent::StopVoice(clip_id) => self.stop_voice(clip_id),
+        }
+    }
+
+    fn start_voice(&mut self, clip: ClipPlayback) {
+        if self.voices.iter().any(|voice| voice.clip_id() == Some(clip.clip_id())) {
+            return;
+        }
+        if let Some(voice) = self.voices.iter_mut().find(|voice| !voice.is_active()) {
+            voice.activate(clip);
+        }
+    }
+
+    fn stop_voice(&mut self, clip_id: ClipId) {
+        if let Some(voice) = self.voices.iter_mut().find(|voice| voice.clip_id() == Some(clip_id)) {
+            voice.deactivate();
         }
     }
 
@@ -171,8 +196,8 @@ impl<const N: usize> VoiceManager<N> {
 mod tests {
     use super::{VoiceId, VoiceManager};
     use crate::{
-        AudioBuffer, AudioClip, AudioFormat, AudioSnapshot, ClipId, ClipScheduler, SampleTime,
-        Timeline, TrackId,
+        AudioBuffer, AudioClip, AudioFormat, AudioSnapshot, ClipId, ClipScheduler, EventScheduler,
+        SampleTime, Timeline, TrackId,
     };
 
     #[test]
@@ -189,8 +214,16 @@ mod tests {
         let scheduler = ClipScheduler::new(&snapshot);
         let mut voices = VoiceManager::<2>::new(440.0, format);
         let mut output = AudioBuffer::new(8, format).expect("valid buffer");
+        let mut events = EventScheduler::<2>::new();
 
-        voices.process(&mut output.block_mut(), &scheduler, TrackId::new(1), SampleTime::new(0));
+        let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(0), 8);
+        voices.process(
+            &mut output.block_mut(),
+            scheduled,
+            &scheduler,
+            TrackId::new(1),
+            SampleTime::new(0),
+        );
         assert_eq!(voices.active_voice_count(), 1);
         assert_eq!(
             voices.voice(VoiceId::new(0)).and_then(|voice| voice.clip_id()),
@@ -198,7 +231,14 @@ mod tests {
         );
         assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
 
-        voices.process(&mut output.block_mut(), &scheduler, TrackId::new(1), SampleTime::new(100));
+        let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(100), 8);
+        voices.process(
+            &mut output.block_mut(),
+            scheduled,
+            &scheduler,
+            TrackId::new(1),
+            SampleTime::new(100),
+        );
         assert_eq!(voices.active_voice_count(), 0);
         assert!(output.as_slice().iter().all(|sample| *sample == 0.0));
     }
@@ -223,9 +263,12 @@ mod tests {
         let scheduler = ClipScheduler::new(&snapshot);
         let mut voices = VoiceManager::<2>::new(440.0, format);
         let mut output = AudioBuffer::new(8, format).expect("valid buffer");
+        let mut events = EventScheduler::<4>::new();
 
+        let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(6_000), 8);
         voices.process(
             &mut output.block_mut(),
+            scheduled,
             &scheduler,
             TrackId::new(1),
             SampleTime::new(6_000),
@@ -251,10 +294,25 @@ mod tests {
         let scheduler = ClipScheduler::new(&snapshot);
         let mut voices = VoiceManager::<2>::new(440.0, format);
         let mut output = AudioBuffer::new(8, format).expect("valid buffer");
+        let mut events = EventScheduler::<6>::new();
 
-        voices.process(&mut output.block_mut(), &scheduler, TrackId::new(1), SampleTime::new(0));
+        let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(0), 8);
+        voices.process(
+            &mut output.block_mut(),
+            scheduled,
+            &scheduler,
+            TrackId::new(1),
+            SampleTime::new(0),
+        );
         assert_eq!(voices.active_voice_count(), 2);
-        voices.process(&mut output.block_mut(), &scheduler, TrackId::new(1), SampleTime::new(100));
+        let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(100), 8);
+        voices.process(
+            &mut output.block_mut(),
+            scheduled,
+            &scheduler,
+            TrackId::new(1),
+            SampleTime::new(100),
+        );
         assert_eq!(voices.active_voice_count(), 0);
     }
 }

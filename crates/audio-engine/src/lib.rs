@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod device;
 pub mod engine;
+pub mod event;
 pub mod graph;
 pub mod meter;
 pub mod node;
@@ -13,6 +14,7 @@ pub mod voice;
 
 pub use buffer::{AudioBlock, AudioBlockMut, AudioBuffer, AudioFormat};
 pub use engine::AudioEngine;
+pub use event::{EventScheduler, MAX_SCHEDULED_EVENTS_PER_TRACK, ScheduledEvent, VoiceEvent};
 pub use graph::AudioGraph;
 pub use meter::AudioMeter;
 pub use node::{AudioGraphCommand, AudioNode, GainNode, MasterBus, MixerNode, OscillatorNode};

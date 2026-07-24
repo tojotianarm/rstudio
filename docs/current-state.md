@@ -26,6 +26,9 @@ Each track has an eight-slot, preallocated `VoiceManager`; every active clip is 
 audio-thread-owned `OscillatorNode` voice, allowing overlapping clips to render simultaneously.
 Voice slots are activated and released in place, without callback-time allocation, locks, or
 dynamic track lookup. Each track also has channel gain, mute state, and a preallocated output buffer.
+`EventScheduler` produces a fixed, ordered list of voice start/stop events for each callback
+block. The voice pool consumes each event before its exact output frame, so clips can start and
+end sample-accurately inside a CPAL block rather than only at a block boundary.
 Track names are configuration-only; the callback uses only a fixed array and `TrackId` comparisons.
 CPAL's negotiated sample rate and channel count configure the graph before stream creation.
 `AudioMeter` measures peak and RMS after the master bus; CPAL publishes the values as
@@ -59,6 +62,7 @@ files are read yet.
 - Sample-accurate clips and non-real-time timeline queries, ready for a future sequencer.
 - Immutable fixed-capacity snapshots, lock-free snapshot publication, and clip scheduling.
 - Fixed-capacity polyphonic voice pools per track, including overlapping clip rendering.
+- Sample-accurate start/stop scheduling inside a callback block through fixed event tables.
 - Extensible multi-input/multi-output `AudioNode` contract; `MixerNode` supports a fixed number
   of input buses.
 
@@ -66,7 +70,7 @@ files are read yet.
 
 - Input streams and recording.
 - Dynamic graph routing, audio-file clip playback, voice stealing, and scalable snapshot capacities.
-- Sample-accurate clip starts/stops within a callback block and runtime voice-capacity changes.
+- Runtime voice-capacity changes, voice stealing, and dynamic graph routing.
 - Device selection, device-change recovery, and negotiated fixed buffer size.
 - MIDI, UI, project persistence, plugins, effects, and automation.
 - Real-time performance benchmarks and hardware integration tests.

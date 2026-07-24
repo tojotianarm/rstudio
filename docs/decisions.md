@@ -233,3 +233,23 @@ makes all pool scans and rendering bounded. The audio callback reads only `Audio
 uses no locks, and mixes active voices directly into the existing track buffer. Capacity changes,
 voice stealing, and sample-accurate intra-block scheduling remain explicit future work rather than
 hidden real-time behavior.
+
+---
+
+# ADR-012: Fixed Intra-Block Voice Event Scheduling
+
+Date: 2026-07-24
+
+## Decision
+
+For each rendered track block, convert bounded snapshot clip ranges into a fixed-size, offset
+ordered `EventScheduler` list of `StartVoice` and `StopVoice` events. Apply each event immediately
+before rendering its target frame.
+
+## Reason
+
+Checking only whether a clip is active at the beginning of a callback makes its audible boundaries
+depend on the CPAL block size. A bounded event table keeps scheduling deterministic while producing
+sample-accurate starts and stops. It avoids callback-time allocation and does not give the audio
+thread access to the editable timeline. Stop events precede start events at equal offsets so slot
+reuse has a deterministic order.

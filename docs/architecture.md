@@ -102,9 +102,13 @@ the fixed track array, without maps, locks, or allocation.
 
 Voice capacity is selected when each track is built, rather than resized while rendering. At this
 stage, excess simultaneous clips are left unassigned once the pool is full; voice stealing and
-runtime polyphony reconfiguration require a future non-real-time graph/snapshot rebuild. Clip
-activation is currently evaluated at block boundaries, so the next sequencing step must add
-sample-accurate starts and stops inside a rendered block.
+runtime polyphony reconfiguration require a future non-real-time graph/snapshot rebuild.
+
+For every track block, `EventScheduler` scans only its bounded immutable snapshot data and writes
+ordered `StartVoice` and `StopVoice` entries to fixed storage. Each entry has a frame offset in
+the current callback block; stops sort before starts at the same offset. `VoiceManager` applies
+those events immediately before rendering the matching frame, which gives sample-accurate clip
+boundaries without traversing the mutable timeline, allocating, or locking in the callback.
 
 `MasterBus` applies final gain and is the future insertion point for limiter, EQ, or compression.
 All track, mix, and master buffers are allocated before the stream starts, so callback execution
@@ -148,7 +152,7 @@ Timeline -> SnapshotCompiler -> immutable AudioSnapshot
 CPAL output callback
      |
      v
-AudioGraph: scheduler -> per-track VoiceManager -> mixer -> master bus -> meter
+AudioGraph: ClipScheduler -> EventScheduler -> per-track VoiceManager -> mixer -> master bus -> meter
      |
      v
 Audio Output
