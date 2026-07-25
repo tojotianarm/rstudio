@@ -9,3 +9,4 @@ dsp = { path = "../dsp" }
 cpal = "0.16"
 crossbeam-queue = { workspace = true }
 thiserror = { workspace = true }
+hound = "3.5"

@@ -125,6 +125,19 @@ commands update targets through `SetParameter`; `SimpleSynth` reads frequency, g
 parameters from this store while rendering. The same fixed-store boundary prepares automation,
 MIDI controllers, effects and plugin parameters without locks or callback-time allocation.
 
+Each track processes its `EffectRack<4>` after its instrument voices and before the mixer. A second
+`EffectRack<4>` processes the mixed signal before `MasterBus`. Racks store concrete fixed slots,
+run effects in insertion order, and process buffers in place; `AudioEffect` is the extension point
+for future EQ, delay, dynamics and plugin adapters.
+
+Audio-file playback is prepared outside the real-time path. `WavLoader` decodes WAV data into a
+`PcmAudioBuffer`, while `SampleRegistryBuilder` places that PCM data into a fixed `SampleRegistry`.
+The registry is attached to `AudioEngine` before the engine is moved into the CPAL callback and is
+then read-only. `AudioClip` and `ClipPlayback` can identify `ClipSource::AudioFile(SampleId)`;
+the snapshot therefore carries only a copyable sample identifier, never a file handle or mutable
+project object. `SamplePlayer` already provides allocation-free frame reading with linear sample
+rate conversion. Wiring `SamplePlayer` into a `SampleVoice` is the remaining playback step.
+
 `MasterBus` applies final gain and is the future insertion point for limiter, EQ, or compression.
 All track, mix, and master buffers are allocated before the stream starts, so callback execution
 neither allocates nor resizes memory.

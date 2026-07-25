@@ -34,6 +34,15 @@ block. The voice pool consumes each event before its exact output frame, so clip
 end sample-accurately inside a CPAL block rather than only at a block boundary.
 The initial fixed-capacity `ParameterStore` supplies smoothed frequency, gain and ADSR targets to
 `SimpleSynth` through the generic `SetParameter` command, with no blocking synchronization.
+Each track and the master path now own an in-place fixed-capacity `EffectRack`; empty slots cost
+only a bounded branch. `GainEffect` is the initial parameter-driven validation effect.
+
+The audio-file foundation is available outside the callback: `WavLoader` decodes WAV into
+`PcmAudioBuffer`, and `SampleRegistryBuilder` constructs an immutable fixed-capacity
+`SampleRegistry` before it is attached to `AudioEngine`. Timeline clips and snapshots can carry
+`ClipSource::AudioFile(SampleId)`. `SamplePlayer` performs preloaded PCM playback and simple
+linear sample-rate conversion without allocation. The final `SampleVoice` connection to
+`VoiceManager` and CPAL output is not implemented yet.
 Track names are configuration-only; the callback uses only a fixed array and `TrackId` comparisons.
 CPAL's negotiated sample rate and channel count configure the graph before stream creation.
 `AudioMeter` measures peak and RMS after the master bus; CPAL publishes the values as
@@ -70,6 +79,7 @@ files are read yet.
 - Sample-accurate start/stop scheduling inside a callback block through fixed event tables.
 - `Instrument` abstraction with a first polyphonic `SimpleSynth` and allocation-free ADSR.
 - Fixed real-time parameter store with descriptors, clamping, targets and deterministic smoothing.
+- WAV loading, immutable preloaded sample registry, audio-file clip source metadata, and sample player foundation.
 - Extensible multi-input/multi-output `AudioNode` contract; `MixerNode` supports a fixed number
   of input buses.
 
@@ -78,6 +88,7 @@ files are read yet.
 - Input streams and recording.
 - Dynamic graph routing, audio-file clip playback, voice stealing, and scalable snapshot capacities.
 - Runtime voice-capacity changes, voice stealing, additional instrument families, and dynamic graph routing.
+- `SampleVoice` integration from `SampleRegistry` through `VoiceManager` to CPAL output.
 - Device selection, device-change recovery, and negotiated fixed buffer size.
 - MIDI, UI, project persistence, plugins, effects, and automation.
 - Real-time performance benchmarks and hardware integration tests.

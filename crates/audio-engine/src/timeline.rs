@@ -1,4 +1,10 @@
-use crate::TrackId;
+use crate::{SampleId, TrackId};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipSource {
+    Synth,
+    AudioFile(SampleId),
+}
 
 /// Sample-accurate position or duration used by project-time models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -41,6 +47,7 @@ pub struct AudioClip {
     track_id: TrackId,
     start_position: SampleTime,
     length: SampleTime,
+    source: ClipSource,
 }
 
 impl AudioClip {
@@ -50,7 +57,15 @@ impl AudioClip {
         start_position: SampleTime,
         length: SampleTime,
     ) -> Self {
-        Self { id, track_id, start_position, length }
+        Self { id, track_id, start_position, length, source: ClipSource::Synth }
+    }
+
+    pub const fn with_source(mut self, source: ClipSource) -> Self {
+        self.source = source;
+        self
+    }
+    pub const fn source(self) -> ClipSource {
+        self.source
     }
 
     pub const fn id(self) -> ClipId {

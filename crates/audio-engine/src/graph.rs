@@ -3,8 +3,8 @@ use common::error::Result;
 use crate::snapshot::AudioSnapshotReceiver;
 use crate::{
     AudioBlockMut, AudioBuffer, AudioFormat, AudioGraphCommand, AudioMeter, AudioNode,
-    AudioSnapshot, ClipScheduler, ENGINE_PARAMETERS, MasterBus, MixerNode, PARAMETER_CAPACITY,
-    ParameterStore, SampleTime, Track, TrackId,
+    AudioSnapshot, ClipScheduler, ENGINE_PARAMETERS, EffectRack, MasterBus, MixerNode,
+    PARAMETER_CAPACITY, ParameterStore, SampleTime, Track, TrackId,
 };
 
 /// Fixed first-stage DAW graph with two independent track channels.
@@ -23,6 +23,7 @@ pub struct AudioGraph {
     snapshot: AudioSnapshot,
     snapshot_receiver: Option<AudioSnapshotReceiver>,
     parameters: ParameterStore<PARAMETER_CAPACITY>,
+    master_effects: EffectRack<4>,
 }
 
 impl AudioGraph {
@@ -51,6 +52,7 @@ impl AudioGraph {
             snapshot: AudioSnapshot::prototype(),
             snapshot_receiver: None,
             parameters: ParameterStore::new(&ENGINE_PARAMETERS),
+            master_effects: EffectRack::empty(),
         };
         graph.prepare(format, maximum_block_frames)?;
         Ok(graph)
@@ -85,6 +87,7 @@ impl AudioGraph {
             track.prepare(format);
         }
         self.master_bus.prepare(format);
+        self.master_effects.prepare(format);
         self.track_buffers = track_buffers;
         self.mix_buffer = mix_buffer;
         self.maximum_block_frames = maximum_block_frames;
@@ -128,6 +131,11 @@ impl AudioGraph {
         };
         self.mixer.process(&inputs, std::slice::from_mut(&mut mix_output));
 
+        let Some(mut effected_mix) = self.mix_buffer.block_mut_for_frames(frames) else {
+            self.clear_and_measure(output);
+            return;
+        };
+        self.master_effects.process(&mut effected_mix, &mut self.parameters);
         let Some(mix_input) = self.mix_buffer.block_for_frames(frames) else {
             self.clear_and_measure(output);
             return;

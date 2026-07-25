@@ -1,5 +1,5 @@
 use crate::{
-    AudioBlockMut, AudioFormat, AudioGraphCommand, ClipScheduler, EventScheduler,
+    AudioBlockMut, AudioFormat, AudioGraphCommand, ClipScheduler, EffectRack, EventScheduler,
     MAX_SCHEDULED_EVENTS_PER_TRACK, MAX_VOICES_PER_TRACK, PARAMETER_CAPACITY, ParameterStore,
     SampleTime, VoiceManager,
 };
@@ -39,6 +39,7 @@ struct TrackRealtimeState {
     solo: bool,
     voices: VoiceManager<MAX_VOICES_PER_TRACK>,
     event_scheduler: EventScheduler<MAX_SCHEDULED_EVENTS_PER_TRACK>,
+    effects: EffectRack<4>,
 }
 
 impl Track {
@@ -51,6 +52,7 @@ impl Track {
                 solo: false,
                 voices: VoiceManager::new(frequency, format),
                 event_scheduler: EventScheduler::new(),
+                effects: EffectRack::empty(),
             },
         }
     }
@@ -89,6 +91,7 @@ impl Track {
 
     pub fn prepare(&mut self, format: AudioFormat) {
         self.realtime.voices.prepare(format);
+        self.realtime.effects.prepare(format);
     }
 
     /// Renders the fixed voice pool only for clips active in the immutable snapshot.
@@ -103,6 +106,7 @@ impl Track {
         let events =
             self.realtime.event_scheduler.schedule(scheduler, track_id, position, output.frames());
         self.realtime.voices.process(output, events, scheduler, track_id, position, parameters);
+        self.realtime.effects.process(output, parameters);
         self.apply_channel_state(output);
     }
 

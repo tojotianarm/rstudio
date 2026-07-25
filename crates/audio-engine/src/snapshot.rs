@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crossbeam_queue::ArrayQueue;
 use thiserror::Error;
 
-use crate::{AudioClip, ClipId, SampleTime, Timeline, TrackId};
+use crate::{AudioClip, ClipId, ClipSource, SampleTime, Timeline, TrackId};
 
 pub const SNAPSHOT_TRACK_COUNT: usize = 2;
 pub const MAX_CLIPS_PER_TRACK: usize = 16;
@@ -15,6 +15,7 @@ pub struct ClipPlayback {
     clip_id: ClipId,
     start: SampleTime,
     end: SampleTime,
+    source: ClipSource,
 }
 
 impl ClipPlayback {
@@ -28,6 +29,9 @@ impl ClipPlayback {
 
     pub const fn end(self) -> SampleTime {
         self.end
+    }
+    pub const fn source(self) -> ClipSource {
+        self.source
     }
 
     pub fn is_active_at(self, position: SampleTime) -> bool {
@@ -84,6 +88,7 @@ impl AudioSnapshot {
             clip_id: ClipId::new(0),
             start: SampleTime::new(0),
             end: SampleTime::new(u64::MAX),
+            source: ClipSource::Synth,
         };
         let mut first = AudioTrackSnapshot::new(TrackId::new(1));
         let mut second = AudioTrackSnapshot::new(TrackId::new(2));
@@ -134,6 +139,7 @@ fn compile_clip(clip: AudioClip) -> ClipPlayback {
         end: SampleTime::new(
             clip.start_position().samples().saturating_add(clip.length().samples()),
         ),
+        source: clip.source(),
     }
 }
 

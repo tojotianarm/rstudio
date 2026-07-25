@@ -11,6 +11,7 @@ pub struct AudioEngine {
     graph: AudioGraph,
     render_buffer: AudioBuffer,
     transport: Transport,
+    samples: crate::SampleRegistry,
 }
 
 impl AudioEngine {
@@ -24,11 +25,20 @@ impl AudioEngine {
             transport: Transport::new(config.sample_rate),
             config,
             running: false,
+            samples: crate::SampleRegistryBuilder::new().build(),
         })
     }
 
     pub fn start(&mut self) {
         self.running = true;
+    }
+    /// Replaces the preloaded immutable sample registry before the engine is moved into CPAL.
+    pub fn with_sample_registry(mut self, samples: crate::SampleRegistry) -> Self {
+        self.samples = samples;
+        self
+    }
+    pub(crate) fn samples(&self) -> &crate::SampleRegistry {
+        &self.samples
     }
 
     pub fn stop(&mut self) {
