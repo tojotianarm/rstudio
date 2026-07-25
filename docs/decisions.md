@@ -253,3 +253,41 @@ depend on the CPAL block size. A bounded event table keeps scheduling determinis
 sample-accurate starts and stops. It avoids callback-time allocation and does not give the audio
 thread access to the editable timeline. Stop events precede start events at equal offsets so slot
 reuse has a deterministic order.
+
+---
+
+# ADR-013: Concrete Instrument Voices with ADSR Release
+
+Date: 2026-07-25
+
+## Decision
+
+Define an `Instrument` real-time contract in `audio-engine`, and make each fixed voice own a
+concrete `SimpleSynth`. `SimpleSynth` combines the DSP oscillator with an allocation-free ADSR
+envelope. `StopVoice` invokes `note_off`; the slot remains allocated until the envelope is idle.
+
+## Reason
+
+Separating a voice's scheduling identity from the instrument's DSP state prepares the engine for
+samplers and richer synthesis without coupling clips to an oscillator. Storing the concrete first
+instrument directly avoids trait-object allocation and dispatch in the hot path. Delaying slot
+reuse through release prevents clicks from abrupt signal truncation while preserving fixed,
+deterministic voice-pool bounds.
+
+---
+
+# ADR-014: Fixed Real-Time Parameter Store
+
+Date: 2026-07-25
+
+## Decision
+
+Use a fixed-capacity `ParameterStore` with stable numeric identifiers, descriptors, bounded
+targets and sample-count smoothing. `SetParameter` is consumed through the existing audio command
+queue; the first integration supplies all `SimpleSynth` controls.
+
+## Reason
+
+The store centralizes mutable real-time control without maps, locks or allocation. It creates one
+parameter protocol reusable by automation, MIDI CC, effects and future plugin bridges while
+keeping the initial graph bounded and deterministic.

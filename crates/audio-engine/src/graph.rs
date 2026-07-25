@@ -3,7 +3,8 @@ use common::error::Result;
 use crate::snapshot::AudioSnapshotReceiver;
 use crate::{
     AudioBlockMut, AudioBuffer, AudioFormat, AudioGraphCommand, AudioMeter, AudioNode,
-    AudioSnapshot, ClipScheduler, MasterBus, MixerNode, SampleTime, Track, TrackId,
+    AudioSnapshot, ClipScheduler, ENGINE_PARAMETERS, MasterBus, MixerNode, PARAMETER_CAPACITY,
+    ParameterStore, SampleTime, Track, TrackId,
 };
 
 /// Fixed first-stage DAW graph with two independent track channels.
@@ -21,6 +22,7 @@ pub struct AudioGraph {
     meter: AudioMeter,
     snapshot: AudioSnapshot,
     snapshot_receiver: Option<AudioSnapshotReceiver>,
+    parameters: ParameterStore<PARAMETER_CAPACITY>,
 }
 
 impl AudioGraph {
@@ -48,6 +50,7 @@ impl AudioGraph {
             meter: AudioMeter::default(),
             snapshot: AudioSnapshot::prototype(),
             snapshot_receiver: None,
+            parameters: ParameterStore::new(&ENGINE_PARAMETERS),
         };
         graph.prepare(format, maximum_block_frames)?;
         Ok(graph)
@@ -107,7 +110,7 @@ impl AudioGraph {
                 self.clear_and_measure(output);
                 return;
             };
-            track.process(&mut track_output, &scheduler, position);
+            track.process(&mut track_output, &scheduler, position, &mut self.parameters);
         }
 
         let Some(track_one) = self.track_buffers[0].block_for_frames(frames) else {
@@ -146,7 +149,8 @@ impl AudioGraph {
     pub fn apply_command(&mut self, command: AudioGraphCommand) {
         match command {
             AudioGraphCommand::SetMasterGain(_) => self.master_bus.apply_command(command),
-            AudioGraphCommand::SetOscillatorFrequency(_) => {
+            AudioGraphCommand::SetOscillatorFrequency(frequency) => {
+                self.set_parameter(crate::SYNTH_FREQUENCY_PARAMETER, frequency);
                 for track in &mut self.tracks {
                     track.apply_command(command);
                 }
@@ -160,6 +164,10 @@ impl AudioGraph {
                 track.set_gain(gain);
             }
         }
+    }
+
+    pub fn set_parameter(&mut self, id: crate::ParameterId, value: crate::ParameterValue) {
+        let _ = self.parameters.set_target(id, value);
     }
 
     pub fn set_track_mute(&mut self, track_id: TrackId, muted: bool) {

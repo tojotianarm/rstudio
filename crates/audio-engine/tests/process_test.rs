@@ -238,7 +238,12 @@ fn clip_start_and_stop_are_sample_accurate_within_a_block() {
 
     assert!(output.as_slice()[..100].iter().all(|sample| *sample == 0.0));
     assert!(output.as_slice()[100..300].iter().any(|sample| *sample != 0.0));
-    assert!(output.as_slice()[300..].iter().all(|sample| *sample == 0.0));
+    assert!(output.as_slice()[300..].iter().any(|sample| *sample != 0.0));
+
+    graph.process(&mut output.block_mut(), SampleTime::new(1_000));
+    assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
+    graph.process(&mut output.block_mut(), SampleTime::new(1_512));
+    assert!(output.as_slice().iter().all(|sample| *sample == 0.0));
 }
 
 #[test]
@@ -268,8 +273,13 @@ fn overlapping_clips_change_the_active_signal_at_exact_offsets() {
     assert!(output.as_slice()[100..200].iter().any(|sample| *sample != 0.0));
     assert!(output.as_slice()[200..300].iter().any(|sample| *sample != 0.0));
     assert!(output.as_slice()[300..400].iter().any(|sample| *sample != 0.0));
-    assert!(output.as_slice()[400..].iter().all(|sample| *sample == 0.0));
+    assert!(output.as_slice()[400..].iter().any(|sample| *sample != 0.0));
     assert!(output.as_slice().iter().all(|sample| sample.is_finite()));
+
+    graph.process(&mut output.block_mut(), SampleTime::new(1_000));
+    assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
+    graph.process(&mut output.block_mut(), SampleTime::new(1_512));
+    assert!(output.as_slice().iter().all(|sample| *sample == 0.0));
 }
 
 fn process_gain(gain_value: f32) -> [f32; 2] {

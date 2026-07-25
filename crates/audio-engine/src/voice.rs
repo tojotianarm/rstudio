@@ -1,7 +1,7 @@
-use crate::OscillatorNode;
 use crate::{
-    AudioBlockMut, AudioFormat, AudioGraphCommand, AudioNode, ClipId, ClipPlayback, ClipScheduler,
-    SampleTime, ScheduledEvent, TrackId, VoiceEvent,
+    AudioBlockMut, AudioFormat, AudioGraphCommand, ClipId, ClipPlayback, ClipScheduler, Instrument,
+    PARAMETER_CAPACITY, ParameterStore, SampleTime, ScheduledEvent, SimpleSynth, TrackId,
+    VoiceEvent,
 };
 
 /// Default bounded polyphony for one fixed track.
@@ -29,7 +29,7 @@ pub struct Voice {
     id: VoiceId,
     clip_id: Option<ClipId>,
     start_position: SampleTime,
-    source: OscillatorNode,
+    instrument: SimpleSynth,
 }
 
 impl Voice {
@@ -38,7 +38,7 @@ impl Voice {
             id,
             clip_id: None,
             start_position: SampleTime::new(0),
-            source: OscillatorNode::new(frequency, format),
+            instrument: SimpleSynth::new(frequency, format),
         }
     }
 
@@ -61,31 +61,43 @@ impl Voice {
     fn activate(&mut self, clip: ClipPlayback) {
         self.clip_id = Some(clip.clip_id());
         self.start_position = clip.start();
-        self.source.reset();
+        self.instrument.note_on(self.instrument.default_note());
     }
 
     fn deactivate(&mut self) {
+        self.instrument.reset();
         self.clip_id = None;
     }
 
+    fn note_off(&mut self) {
+        self.instrument.note_off();
+    }
+
     fn prepare(&mut self, format: AudioFormat) {
-        self.source.prepare(format);
+        self.instrument.prepare(format);
         self.deactivate();
     }
 
     fn reset(&mut self) {
-        self.source.reset();
         self.deactivate();
     }
 
-    fn render_frame(&mut self, frame: &mut [f32]) {
+    fn render_frame(
+        &mut self,
+        frame: &mut [f32],
+        parameters: &mut ParameterStore<PARAMETER_CAPACITY>,
+    ) {
         if self.is_active() {
-            self.source.render_frame_add(frame);
+            self.instrument.render_frame(frame, parameters);
         }
     }
 
     fn apply_command(&mut self, command: AudioGraphCommand) {
-        self.source.apply_command(command);
+        self.instrument.apply_command(command);
+    }
+
+    fn release_finished(&self) -> bool {
+        self.is_active() && !self.instrument.is_active()
     }
 }
 
@@ -129,6 +141,7 @@ impl<const N: usize> VoiceManager<N> {
         scheduler: &ClipScheduler<'_>,
         track_id: TrackId,
         position: SampleTime,
+        parameters: &mut ParameterStore<PARAMETER_CAPACITY>,
     ) {
         output.clear();
 
@@ -137,7 +150,7 @@ impl<const N: usize> VoiceManager<N> {
                 scheduler.active_clips(track_id, position).any(|clip| clip.clip_id() == clip_id)
             });
             if !still_active {
-                voice.deactivate();
+                voice.note_off();
             }
         }
 
@@ -152,7 +165,12 @@ impl<const N: usize> VoiceManager<N> {
             }
 
             for voice in &mut self.voices {
-                voice.render_frame(frame);
+                voice.render_frame(frame, parameters);
+            }
+            for voice in &mut self.voices {
+                if voice.release_finished() {
+                    voice.deactivate();
+                }
             }
         }
     }
@@ -175,7 +193,7 @@ impl<const N: usize> VoiceManager<N> {
 
     fn stop_voice(&mut self, clip_id: ClipId) {
         if let Some(voice) = self.voices.iter_mut().find(|voice| voice.clip_id() == Some(clip_id)) {
-            voice.deactivate();
+            voice.note_off();
         }
     }
 
@@ -196,8 +214,9 @@ impl<const N: usize> VoiceManager<N> {
 mod tests {
     use super::{VoiceId, VoiceManager};
     use crate::{
-        AudioBuffer, AudioClip, AudioFormat, AudioSnapshot, ClipId, ClipScheduler, EventScheduler,
-        SampleTime, Timeline, TrackId,
+        AudioBuffer, AudioClip, AudioFormat, AudioSnapshot, ClipId, ClipScheduler,
+        ENGINE_PARAMETERS, EventScheduler, PARAMETER_CAPACITY, ParameterStore, SampleTime,
+        Timeline, TrackId,
     };
 
     #[test]
@@ -215,6 +234,7 @@ mod tests {
         let mut voices = VoiceManager::<2>::new(440.0, format);
         let mut output = AudioBuffer::new(8, format).expect("valid buffer");
         let mut events = EventScheduler::<2>::new();
+        let mut parameters = ParameterStore::<PARAMETER_CAPACITY>::new(&ENGINE_PARAMETERS);
 
         let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(0), 8);
         voices.process(
@@ -223,6 +243,7 @@ mod tests {
             &scheduler,
             TrackId::new(1),
             SampleTime::new(0),
+            &mut parameters,
         );
         assert_eq!(voices.active_voice_count(), 1);
         assert_eq!(
@@ -238,9 +259,24 @@ mod tests {
             &scheduler,
             TrackId::new(1),
             SampleTime::new(100),
+            &mut parameters,
         );
+        assert_eq!(voices.active_voice_count(), 1);
+        assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
+
+        for block in 1..=60 {
+            let position = SampleTime::new(100 + block * 8);
+            let scheduled = events.schedule(&scheduler, TrackId::new(1), position, 8);
+            voices.process(
+                &mut output.block_mut(),
+                scheduled,
+                &scheduler,
+                TrackId::new(1),
+                position,
+                &mut parameters,
+            );
+        }
         assert_eq!(voices.active_voice_count(), 0);
-        assert!(output.as_slice().iter().all(|sample| *sample == 0.0));
     }
 
     #[test]
@@ -264,6 +300,7 @@ mod tests {
         let mut voices = VoiceManager::<2>::new(440.0, format);
         let mut output = AudioBuffer::new(8, format).expect("valid buffer");
         let mut events = EventScheduler::<4>::new();
+        let mut parameters = ParameterStore::<PARAMETER_CAPACITY>::new(&ENGINE_PARAMETERS);
 
         let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(6_000), 8);
         voices.process(
@@ -272,6 +309,7 @@ mod tests {
             &scheduler,
             TrackId::new(1),
             SampleTime::new(6_000),
+            &mut parameters,
         );
 
         assert_eq!(voices.active_voice_count(), 2);
@@ -295,6 +333,7 @@ mod tests {
         let mut voices = VoiceManager::<2>::new(440.0, format);
         let mut output = AudioBuffer::new(8, format).expect("valid buffer");
         let mut events = EventScheduler::<6>::new();
+        let mut parameters = ParameterStore::<PARAMETER_CAPACITY>::new(&ENGINE_PARAMETERS);
 
         let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(0), 8);
         voices.process(
@@ -303,6 +342,7 @@ mod tests {
             &scheduler,
             TrackId::new(1),
             SampleTime::new(0),
+            &mut parameters,
         );
         assert_eq!(voices.active_voice_count(), 2);
         let scheduled = events.schedule(&scheduler, TrackId::new(1), SampleTime::new(100), 8);
@@ -312,7 +352,21 @@ mod tests {
             &scheduler,
             TrackId::new(1),
             SampleTime::new(100),
+            &mut parameters,
         );
+        assert_eq!(voices.active_voice_count(), 2);
+        for block in 1..=60 {
+            let position = SampleTime::new(100 + block * 8);
+            let scheduled = events.schedule(&scheduler, TrackId::new(1), position, 8);
+            voices.process(
+                &mut output.block_mut(),
+                scheduled,
+                &scheduler,
+                TrackId::new(1),
+                position,
+                &mut parameters,
+            );
+        }
         assert_eq!(voices.active_voice_count(), 0);
     }
 }

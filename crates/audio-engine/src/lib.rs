@@ -3,8 +3,10 @@ pub mod device;
 pub mod engine;
 pub mod event;
 pub mod graph;
+pub mod instrument;
 pub mod meter;
 pub mod node;
+pub mod parameter;
 pub mod snapshot;
 pub mod stream;
 pub mod timeline;
@@ -16,8 +18,10 @@ pub use buffer::{AudioBlock, AudioBlockMut, AudioBuffer, AudioFormat};
 pub use engine::AudioEngine;
 pub use event::{EventScheduler, MAX_SCHEDULED_EVENTS_PER_TRACK, ScheduledEvent, VoiceEvent};
 pub use graph::AudioGraph;
+pub use instrument::{Instrument, NoteEvent, SimpleSynth};
 pub use meter::AudioMeter;
 pub use node::{AudioGraphCommand, AudioNode, GainNode, MasterBus, MixerNode, OscillatorNode};
+pub use parameter::*;
 pub use snapshot::{
     AudioSnapshot, AudioSnapshotSender, AudioTrackSnapshot, ClipPlayback, ClipScheduler,
     MAX_CLIPS_PER_TRACK, SNAPSHOT_TRACK_COUNT, SnapshotCompileError, SnapshotCompiler,
@@ -40,6 +44,7 @@ pub enum AudioCommand {
     Pause,
     Seek(u64),
     SetBpm(f64),
+    SetParameter { id: ParameterId, value: ParameterValue },
     SetTrackGain { track_id: TrackId, gain: f32 },
     SetTrackMute { track_id: TrackId, muted: bool },
     SetTrackSolo { track_id: TrackId, solo: bool },

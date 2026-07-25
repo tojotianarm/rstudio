@@ -91,11 +91,13 @@ to two tracks and sixteen clips per track, avoiding allocation, reference-count 
 dynamic timeline traversal in the audio thread.
 
 `AudioEngine` delegates rendering to an `AudioGraph` with two fixed `Track` channels. Each track
-owns channel state (gain, mute, solo flag) and a fixed `VoiceManager<8>`. A voice owns an
-`OscillatorNode` and is assigned to one active `ClipPlayback`; overlapping clips therefore render
-through distinct voice slots. The scheduler is queried only against the immutable snapshot, then
-the manager reconciles and mixes its bounded voice pool into the track's preallocated output
-buffer. Inactive slots produce silence. The graph passes both track buffers to `MixerNode(2)`, then routes the mix through `MasterBus`.
+owns channel state (gain, mute, solo flag) and a fixed `VoiceManager<8>`. A voice owns a concrete
+`SimpleSynth` through the `Instrument` contract, and is assigned to one active `ClipPlayback`;
+overlapping clips therefore render through distinct voice slots. `SimpleSynth` encapsulates an
+oscillator and a DSP-owned ADSR envelope. The scheduler is queried only against the immutable
+snapshot, then the manager reconciles and mixes its bounded voice pool into the track's
+preallocated output buffer. Inactive slots produce silence. The graph passes both track buffers to
+`MixerNode(2)`, then routes the mix through `MasterBus`.
 `TrackId` is a stable numeric key for targeted queue commands; track names are configuration data
 and are never read in the callback. `SetTrackGain`, `SetTrackMute`, and `SetTrackSolo` scan only
 the fixed track array, without maps, locks, or allocation.
@@ -109,6 +111,19 @@ ordered `StartVoice` and `StopVoice` entries to fixed storage. Each entry has a 
 the current callback block; stops sort before starts at the same offset. `VoiceManager` applies
 those events immediately before rendering the matching frame, which gives sample-accurate clip
 boundaries without traversing the mutable timeline, allocating, or locking in the callback.
+
+`StartVoice` calls `Instrument::note_on`, beginning the ADSR attack phase. `StopVoice` calls
+`Instrument::note_off`; it does not immediately return the slot to the pool. The voice remains
+owned by the audio thread through `Release` and is released only after the envelope reaches
+`Idle`, avoiding an audible discontinuity. The initial concrete instrument is deliberately stored
+without dynamic dispatch in the voice pool; the trait defines the extension boundary for future
+samplers and synths without introducing callback-time allocation.
+
+`ParameterStore<9>` is the bounded parameter engine for the initial graph. It stores stable
+descriptors, bounded current and target values, and deterministic smoothing state. Application
+commands update targets through `SetParameter`; `SimpleSynth` reads frequency, gain and ADSR
+parameters from this store while rendering. The same fixed-store boundary prepares automation,
+MIDI controllers, effects and plugin parameters without locks or callback-time allocation.
 
 `MasterBus` applies final gain and is the future insertion point for limiter, EQ, or compression.
 All track, mix, and master buffers are allocated before the stream starts, so callback execution
@@ -152,7 +167,7 @@ Timeline -> SnapshotCompiler -> immutable AudioSnapshot
 CPAL output callback
      |
      v
-AudioGraph: ClipScheduler -> EventScheduler -> per-track VoiceManager -> mixer -> master bus -> meter
+AudioGraph: ClipScheduler -> EventScheduler -> VoiceManager -> Instrument/ADSR -> mixer -> master bus -> meter
      |
      v
 Audio Output

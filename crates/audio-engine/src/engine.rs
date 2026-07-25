@@ -90,6 +90,7 @@ impl AudioEngine {
             AudioCommand::Pause => self.transport.pause(),
             AudioCommand::Seek(position_samples) => self.transport.seek(position_samples),
             AudioCommand::SetBpm(bpm) => self.transport.set_bpm(bpm),
+            AudioCommand::SetParameter { id, value } => self.graph.set_parameter(id, value),
             AudioCommand::SetTrackGain { track_id, gain } => {
                 self.graph.set_track_gain(track_id, gain);
             }
