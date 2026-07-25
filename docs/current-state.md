@@ -2,7 +2,8 @@
 
 ## Overview
 
-RSTUDIO now provides a minimal real-time output foundation. The application can initialize the default CPAL output device, create an output stream, and render an oscillator through its callback.
+RSTUDIO now provides an audio-engine MVP: the application can initialize the default CPAL output
+device, schedule synth and preloaded WAV clips, and render them through the same real-time graph.
 
 ## Current Architecture
 
@@ -54,15 +55,15 @@ non-blocking, best-effort events. The callback uses no allocations, locks, or sy
 `Transport` is owned by `AudioEngine`, not by the application or CPAL. It advances its sample
 position only for rendered blocks while playing, and provides sample/second and beat/sample
 conversion using the negotiated sample rate and BPM. Transport commands and best-effort state
-updates use the existing bounded lock-free queues. It does not yet drive clips, automation, MIDI,
-or graph scheduling.
+updates use the existing bounded lock-free queues. Its current position drives immutable-snapshot
+clip scheduling; automation and MIDI remain future work.
 
 `Timeline` and `AudioClip` provide the non-real-time, sample-accurate project model for placing
 events on tracks. `SnapshotCompiler` converts that editable data into an immutable fixed-capacity
 `AudioSnapshot`, transferred through a bounded lock-free queue. The callback consults only the
 current snapshot via `ClipScheduler`; it never traverses the editable timeline. Active clips start
-the prototype oscillator source for their track, while inactive tracks render silence. No audio
-files are read yet.
+either a synth or a preloaded PCM sample source for their track, while inactive tracks render
+silence. Audio files are decoded only before stream construction.
 
 ## Implemented Features
 
@@ -82,17 +83,32 @@ files are read yet.
 - Sample-accurate start/stop scheduling inside a callback block through fixed event tables.
 - `Instrument` abstraction with a first polyphonic `SimpleSynth` and allocation-free ADSR.
 - Fixed real-time parameter store with descriptors, clamping, targets and deterministic smoothing.
-- WAV loading, immutable preloaded sample registry, audio-file clip source metadata, and sample player foundation.
+- WAV loading, immutable preloaded sample registry, audio-file clips, and `SampleVoice` PCM playback.
+- Runnable `mini_daw` example: WAV loading, synth/sample mixing, transport start, and meter events.
+- Application-side `Project` and `EngineController` APIs: editable tracks/clips and WAV loading
+  stay outside the callback; transport, track controls, snapshots, and meter events cross the
+  bounded engine queues only.
 - Extensible multi-input/multi-output `AudioNode` contract; `MixerNode` supports a fixed number
   of input buses.
 
 ## Not Implemented Yet
 
 - Input streams and recording.
-- Dynamic graph routing, audio-file clip playback, voice stealing, and scalable snapshot capacities.
+- Dynamic graph routing, voice stealing, and scalable snapshot capacities.
 - Runtime voice-capacity changes, voice stealing, additional instrument families, and dynamic graph routing.
-- `SampleVoice` integration from `SampleRegistry` through `VoiceManager` to CPAL output.
-- A runnable WAV playback example and end-to-end audio-file playback validation.
+- More than two tracks; the current UI-facing `Project` reflects the fixed two-track MVP graph.
 - Device selection, device-change recovery, and negotiated fixed buffer size.
 - MIDI, UI, project persistence, plugins, effects, and automation.
 - Real-time performance benchmarks and hardware integration tests.
+
+## Running the audio-file demonstration
+
+With an available default output device and a WAV file, run:
+
+```bash
+cargo run -p audio-engine --example mini_daw -- path/to/file.wav
+```
+
+The example preloads the WAV into `SampleRegistry`, schedules it on track 1, adds a synth clip on
+track 2, starts transport, and prints best-effort peak/RMS events. File decoding happens before
+the stream is created; the callback only reads immutable PCM data.

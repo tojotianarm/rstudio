@@ -31,6 +31,7 @@ pub struct Voice {
     start_position: SampleTime,
     instrument: SimpleSynth,
     sample: Option<(crate::SampleId, f64)>,
+    output_sample_rate: u32,
 }
 
 impl Voice {
@@ -41,6 +42,7 @@ impl Voice {
             start_position: SampleTime::new(0),
             instrument: SimpleSynth::new(frequency, format),
             sample: None,
+            output_sample_rate: format.sample_rate(),
         }
     }
 
@@ -83,6 +85,7 @@ impl Voice {
     }
 
     fn prepare(&mut self, format: AudioFormat) {
+        self.output_sample_rate = format.sample_rate();
         self.instrument.prepare(format);
         self.deactivate();
     }
@@ -114,7 +117,7 @@ impl Voice {
                 let b = buffer.sample(next, channel);
                 *output = (*output + a + (b - a) * fraction).clamp(-1.0, 1.0);
             }
-            *position += buffer.sample_rate() as f64 / 48_000.0;
+            *position += buffer.sample_rate() as f64 / self.output_sample_rate as f64;
         } else if self.is_active() {
             self.instrument.render_frame(frame, parameters);
         }
@@ -125,7 +128,7 @@ impl Voice {
     }
 
     fn release_finished(&self) -> bool {
-        self.is_active() && !self.instrument.is_active()
+        self.sample.is_none() && self.is_active() && !self.instrument.is_active()
     }
 }
 

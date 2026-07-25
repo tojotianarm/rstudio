@@ -77,7 +77,7 @@ play/pause state, BPM, and the negotiated sample rate. The transport advances by
 frame count only while playing. Audio time is expressed as absolute sample position; musical time
 is derived from BPM through explicit beat-to-sample helpers. `Play`, `Pause`, `Seek`, and `SetBpm`
 are consumed from the existing command queue, and `TransportUpdate` is published best-effort from
-the callback. The transport does not yet alter graph processing or schedule clips.
+the callback. The transport position is passed to `AudioGraph` and therefore drives clip scheduling.
 
 `Timeline` is a separate non-real-time project model. It stores sample-accurate `AudioClip`
 metadata associated with `TrackId`; editing it may allocate or move its `Vec` and therefore never
@@ -89,6 +89,14 @@ fixed-size snapshot values and retains its current one when no update is availab
 then determines active clips at the current transport position. This first version bounds playback
 to two tracks and sixteen clips per track, avoiding allocation, reference-count destruction, or
 dynamic timeline traversal in the audio thread.
+
+The `app` crate exposes `Project` for editable application-side tracks, clips, and WAV loading,
+and `EngineController` as the future UI's control boundary. `Project` compiles snapshots and
+builds the immutable sample registry before engine startup. `EngineController` sends transport and
+track commands, publishes updated snapshots, and polls meter/transport events without exposing
+`AudioGraph`, `VoiceManager`, CPAL callbacks, or PCM buffers to UI code. The fixed MVP graph
+currently supports exactly two tracks; expanding this requires a non-real-time graph/snapshot
+rebuild rather than callback-time topology changes.
 
 `AudioEngine` delegates rendering to an `AudioGraph` with two fixed `Track` channels. Each track
 owns channel state (gain, mute, solo flag) and a fixed `VoiceManager<8>`. A voice owns a concrete
@@ -139,7 +147,9 @@ project object. `SamplePlayer` already provides allocation-free frame reading wi
 rate conversion. `AudioGraph` owns the immutable registry before stream construction; each fixed
 voice selects either `SimpleSynth` or a PCM cursor from `ClipSource`. A sample voice resolves its
 `SampleId` only in that registry and advances its cursor in place, so no file access, allocation,
-lock, or PCM copy occurs in the callback. End-of-buffer recycles the fixed voice slot.
+lock, or PCM copy occurs in the callback. End-of-buffer recycles the fixed voice slot. The cursor
+advances by the ratio of source sample rate to the CPAL-negotiated output rate, using linear
+interpolation as the deliberately minimal MVP resampler.
 
 `MasterBus` applies final gain and is the future insertion point for limiter, EQ, or compression.
 All track, mix, and master buffers are allocated before the stream starts, so callback execution
@@ -188,6 +198,21 @@ AudioGraph: ClipScheduler -> EventScheduler -> VoiceManager -> Instrument/ADSR -
      v
 Audio Output
 ```
+
+For audio-file clips, the source branch is:
+
+```text
+WAV file --(application thread: WavLoader)--> PcmAudioBuffer -> SampleRegistry
+                                                            |
+AudioClip(AudioFile(SampleId)) -> AudioSnapshot -> EventScheduler -> SampleVoice
+                                                            |
+                                                            v
+Track effects -> Mixer -> Master effects -> MasterBus -> Meter -> CPAL
+```
+
+`SampleRegistry` is fully prepared before `CpalOutputStream::open_default` moves the engine into
+the callback. The callback performs only bounded snapshot/scheduler lookups and PCM reads: it
+does not allocate, lock, resize a `Vec`, perform I/O, or access system services.
 
 ## Design Principles
 

@@ -1,7 +1,9 @@
+use std::{fs, path::PathBuf};
+
 use audio_engine::{
     AudioBuffer, AudioClip, AudioEngine, AudioFormat, AudioGraph, AudioGraphCommand, AudioMeter,
-    AudioNode, AudioSnapshot, ClipId, GainNode, MasterBus, MixerNode, SampleTime, Timeline,
-    TrackId,
+    AudioNode, AudioSnapshot, ClipId, ClipSource, GainNode, MasterBus, MixerNode, PcmAudioBuffer,
+    SampleId, SampleRegistryBuilder, SampleTime, Timeline, TrackId, WavLoader,
 };
 use common::config::AppConfig;
 
@@ -18,6 +20,86 @@ fn engine_processes_an_interleaved_audio_block() {
     assert_eq!(buffer.format(), format);
     assert!(buffer.as_slice().iter().any(|sample| *sample != 0.0));
     assert!(buffer.as_slice().chunks_exact(2).all(|frame| frame[0] == frame[1]));
+}
+
+#[test]
+fn audio_file_clip_renders_preloaded_pcm_with_a_synth_voice() {
+    let format = AudioFormat::new(48_000, 1).expect("valid format");
+    let mut registry = SampleRegistryBuilder::new();
+    registry.insert(SampleId::new(0), load_wav_fixture()).expect("free sample slot");
+    let mut graph = AudioGraph::with_oscillator(format, 64, 440.0).expect("valid graph");
+    graph.set_sample_registry(registry.build());
+    let mut timeline = Timeline::new();
+    timeline.add_clip(
+        AudioClip::new(ClipId::new(1), TrackId::new(1), SampleTime::new(0), SampleTime::new(128))
+            .with_source(ClipSource::AudioFile(SampleId::new(0))),
+    );
+    timeline.add_clip(AudioClip::new(
+        ClipId::new(2),
+        TrackId::new(2),
+        SampleTime::new(0),
+        SampleTime::new(128),
+    ));
+    graph.set_snapshot(AudioSnapshot::compile(&timeline).expect("valid snapshot"));
+    let mut output = AudioBuffer::new(64, format).expect("valid buffer");
+
+    graph.process(&mut output.block_mut(), SampleTime::new(0));
+    assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
+    assert!(output.as_slice().iter().all(|sample| sample.is_finite()));
+    graph.process(&mut output.block_mut(), SampleTime::new(128));
+    assert!(output.as_slice().iter().all(|sample| sample.is_finite()));
+}
+
+fn load_wav_fixture() -> PcmAudioBuffer {
+    let path = temporary_wav_path();
+    let specification = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    {
+        let mut writer =
+            hound::WavWriter::create(&path, specification).expect("create wav fixture");
+        for _ in 0..128 {
+            writer.write_sample(8_192_i16).expect("write wav fixture sample");
+        }
+        writer.finalize().expect("finalize wav fixture");
+    }
+    let result = WavLoader::load(&path).expect("load wav fixture through production loader");
+    fs::remove_file(path).expect("remove wav fixture");
+    result
+}
+
+fn temporary_wav_path() -> PathBuf {
+    std::env::temp_dir().join(format!("rstudio-audio-file-pipeline-{}.wav", std::process::id()))
+}
+
+#[test]
+fn audio_file_clip_stops_when_its_preloaded_buffer_ends() {
+    let format = AudioFormat::new(48_000, 1).expect("valid format");
+    let mut registry = SampleRegistryBuilder::new();
+    registry
+        .insert(
+            SampleId::new(0),
+            PcmAudioBuffer::new(vec![0.25; 64], 48_000, 1).expect("valid pcm"),
+        )
+        .expect("free sample slot");
+    let mut graph = AudioGraph::with_oscillator(format, 64, 440.0).expect("valid graph");
+    graph.set_sample_registry(registry.build());
+    let mut timeline = Timeline::new();
+    timeline.add_clip(
+        AudioClip::new(ClipId::new(1), TrackId::new(1), SampleTime::new(0), SampleTime::new(64))
+            .with_source(ClipSource::AudioFile(SampleId::new(0))),
+    );
+    graph.set_snapshot(AudioSnapshot::compile(&timeline).expect("valid snapshot"));
+    let mut output = AudioBuffer::new(64, format).expect("valid buffer");
+
+    graph.process(&mut output.block_mut(), SampleTime::new(0));
+    assert!(output.as_slice().iter().any(|sample| *sample != 0.0));
+    graph.process(&mut output.block_mut(), SampleTime::new(64));
+
+    assert!(output.as_slice().iter().all(|sample| *sample == 0.0));
 }
 
 #[test]
