@@ -80,6 +80,11 @@ pub struct SampleRegistry {
 pub struct SampleRegistryBuilder {
     samples: [Option<PcmAudioBuffer>; MAX_REGISTERED_SAMPLES],
 }
+impl Default for SampleRegistryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl SampleRegistryBuilder {
     pub fn new() -> Self {
         Self { samples: std::array::from_fn(|_| None) }

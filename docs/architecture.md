@@ -136,7 +136,10 @@ The registry is attached to `AudioEngine` before the engine is moved into the CP
 then read-only. `AudioClip` and `ClipPlayback` can identify `ClipSource::AudioFile(SampleId)`;
 the snapshot therefore carries only a copyable sample identifier, never a file handle or mutable
 project object. `SamplePlayer` already provides allocation-free frame reading with linear sample
-rate conversion. Wiring `SamplePlayer` into a `SampleVoice` is the remaining playback step.
+rate conversion. `AudioGraph` owns the immutable registry before stream construction; each fixed
+voice selects either `SimpleSynth` or a PCM cursor from `ClipSource`. A sample voice resolves its
+`SampleId` only in that registry and advances its cursor in place, so no file access, allocation,
+lock, or PCM copy occurs in the callback. End-of-buffer recycles the fixed voice slot.
 
 `MasterBus` applies final gain and is the future insertion point for limiter, EQ, or compression.
 All track, mix, and master buffers are allocated before the stream starts, so callback execution

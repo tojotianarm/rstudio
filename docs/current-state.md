@@ -41,8 +41,11 @@ The audio-file foundation is available outside the callback: `WavLoader` decodes
 `PcmAudioBuffer`, and `SampleRegistryBuilder` constructs an immutable fixed-capacity
 `SampleRegistry` before it is attached to `AudioEngine`. Timeline clips and snapshots can carry
 `ClipSource::AudioFile(SampleId)`. `SamplePlayer` performs preloaded PCM playback and simple
-linear sample-rate conversion without allocation. The final `SampleVoice` connection to
-`VoiceManager` and CPAL output is not implemented yet.
+linear sample-rate conversion without allocation. The registry is transferred into `AudioGraph`
+before CPAL stream creation and is immutable in the callback. A voice now selects synth or PCM
+from `ClipSource`; sample voices resolve `SampleId` in the registry, render preloaded frames, and
+recycle their fixed slot at end of buffer. Audio-file clips therefore follow the same track,
+mixer, effects, master bus, meter, and CPAL path as synth voices.
 Track names are configuration-only; the callback uses only a fixed array and `TrackId` comparisons.
 CPAL's negotiated sample rate and channel count configure the graph before stream creation.
 `AudioMeter` measures peak and RMS after the master bus; CPAL publishes the values as
@@ -89,6 +92,7 @@ files are read yet.
 - Dynamic graph routing, audio-file clip playback, voice stealing, and scalable snapshot capacities.
 - Runtime voice-capacity changes, voice stealing, additional instrument families, and dynamic graph routing.
 - `SampleVoice` integration from `SampleRegistry` through `VoiceManager` to CPAL output.
+- A runnable WAV playback example and end-to-end audio-file playback validation.
 - Device selection, device-change recovery, and negotiated fixed buffer size.
 - MIDI, UI, project persistence, plugins, effects, and automation.
 - Real-time performance benchmarks and hardware integration tests.

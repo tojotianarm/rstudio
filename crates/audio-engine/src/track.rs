@@ -1,7 +1,7 @@
 use crate::{
     AudioBlockMut, AudioFormat, AudioGraphCommand, ClipScheduler, EffectRack, EventScheduler,
     MAX_SCHEDULED_EVENTS_PER_TRACK, MAX_VOICES_PER_TRACK, PARAMETER_CAPACITY, ParameterStore,
-    SampleTime, VoiceManager,
+    SampleRegistry, SampleTime, VoiceManager,
 };
 
 /// Stable numeric identifier for a track.
@@ -101,11 +101,14 @@ impl Track {
         scheduler: &ClipScheduler<'_>,
         position: SampleTime,
         parameters: &mut ParameterStore<PARAMETER_CAPACITY>,
+        samples: &SampleRegistry,
     ) {
         let track_id = self.id();
         let events =
             self.realtime.event_scheduler.schedule(scheduler, track_id, position, output.frames());
-        self.realtime.voices.process(output, events, scheduler, track_id, position, parameters);
+        self.realtime
+            .voices
+            .process(output, events, scheduler, track_id, position, parameters, samples);
         self.realtime.effects.process(output, parameters);
         self.apply_channel_state(output);
     }

@@ -24,6 +24,7 @@ pub struct AudioGraph {
     snapshot_receiver: Option<AudioSnapshotReceiver>,
     parameters: ParameterStore<PARAMETER_CAPACITY>,
     master_effects: EffectRack<4>,
+    samples: crate::SampleRegistry,
 }
 
 impl AudioGraph {
@@ -53,6 +54,7 @@ impl AudioGraph {
             snapshot_receiver: None,
             parameters: ParameterStore::new(&ENGINE_PARAMETERS),
             master_effects: EffectRack::empty(),
+            samples: crate::SampleRegistryBuilder::new().build(),
         };
         graph.prepare(format, maximum_block_frames)?;
         Ok(graph)
@@ -95,6 +97,9 @@ impl AudioGraph {
         Ok(())
     }
 
+    pub fn set_sample_registry(&mut self, samples: crate::SampleRegistry) {
+        self.samples = samples;
+    }
     pub fn process(&mut self, output: &mut AudioBlockMut<'_>, position: SampleTime) {
         if let Some(receiver) = &self.snapshot_receiver
             && let Some(snapshot) = receiver.take_latest()
@@ -113,7 +118,13 @@ impl AudioGraph {
                 self.clear_and_measure(output);
                 return;
             };
-            track.process(&mut track_output, &scheduler, position, &mut self.parameters);
+            track.process(
+                &mut track_output,
+                &scheduler,
+                position,
+                &mut self.parameters,
+                &self.samples,
+            );
         }
 
         let Some(track_one) = self.track_buffers[0].block_for_frames(frames) else {
